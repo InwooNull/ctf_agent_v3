@@ -1,0 +1,23 @@
+# ctfagent-pwn:0.1 installed versions (recorded from the built image)
+# apt (required):
+binutils=2.40-2
+file=1:5.44-3
+gcc=4:12.2.0-3
+gdb=13.1-3
+git=1:2.39.5-0+deb12u3
+libc6-dev=2.36-9+deb12u14
+pkg-config=1.8.1-1
+Python=3.12.13
+# pip (required):
+pwntools=4.14.1
+ROPgadget=7.6
+# optional:
+one_gadget=1.9.0 (gem; ruby=3.1.2) PRESENT
+pwndbg=ABSENT  # pip has no distribution for this pin; suggest the git setup.sh route (heavy; runs its own apt/pip). gdb -batch scripting is available without it.
+
+# ---- ctfagent-pwn:0.2 (Phase 15) = 0.1 + pwndbg ----
+# Build: docker build -f docker/Dockerfile.pwndbg -t ctfagent-pwn:0.2 .  (network at build time only)
+pwndbg=2024.08.29  commit=26ba400dbdeafa09fce1f77fb93d9940d7db00ba  (git clone + ./setup.sh, pinned tag)
+# load: gdb -q -nx -ex 'source /opt/pwndbg/gdbinit.py'  (also system /etc/gdb/gdbinit)
+# runtime-verified under --network none: heap / bins (tcache/fast/unsorted/small) / context all work.
+# full recorded manifest lives in the image at /opt/ctfagent/pwn_versions.txt

@@ -1,0 +1,72 @@
+# ctfagent-misc:0.3 = ctfagent-misc:0.2 + a specialist forensics/misc tool layer.
+#
+# Adds (Phase 42): sleuthkit (disk/filesystem forensics), john + john-data (hash
+# cracking, CPU), zbar-tools (zbarimg CLI), volatility3 (memory forensics) WITH its
+# Windows/Linux/Mac symbol ISF packs BUNDLED INTO THE IMAGE so vol3 resolves symbols
+# fully offline. hashcat is best-effort (CPU-only here; recorded, never fatal).
+#
+# Network is used ONLY at build time (apt/pip + the one-time symbol-pack download).
+# Every run stays --network none, read-only root, non-root (unchanged from 0.1/0.2).
+# 0.2's p7zip, and 0.1's zsteg/outguess/steghide/tshark/pyzbar, are all preserved.
+FROM ctfagent-misc:0.2
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- required apt tools (build fails if any missing) ------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        sleuthkit zbar-tools john john-data curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v fls icat tsk_recover mmls fsstat zbarimg john >/dev/null \
+    && echo misc-0.3-apt-required-ok
+
+# --- hashcat: best-effort (CPU-only here; record OK/FAIL, never abort) -------
+RUN apt-get update \
+    && if apt-get install -y --no-install-recommends hashcat >/dev/null 2>&1; then \
+         echo "apt:hashcat=OK" >> /opt/ctfagent/optional_status.txt; \
+       else \
+         echo "apt:hashcat=FAIL" >> /opt/ctfagent/optional_status.txt; \
+       fi \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- volatility3 (pinned) ---------------------------------------------------
+RUN pip install --no-cache-dir volatility3==2.28.2 \
+    && command -v vol >/dev/null \
+    && echo misc-0.3-vol3-installed
+
+# --- bundle vol3 OS symbol ISF packs into the install (offline symbol tables) -
+# vol3 reads .zip symbol packs placed directly in its symbols/ dir; no unzip needed.
+RUN SYMDIR="$(python3 -c 'import os,volatility3;print(os.path.join(os.path.dirname(volatility3.__file__),"symbols"))')" \
+    && mkdir -p "$SYMDIR" \
+    && for os_pack in windows linux mac; do \
+         echo "fetching $os_pack.zip ..."; \
+         curl -fsSL -o "$SYMDIR/$os_pack.zip" \
+           "https://downloads.volatilityfoundation.org/volatility3/symbols/$os_pack.zip"; \
+       done \
+    && ls -la "$SYMDIR" \
+    && echo "vol3-symbols-dir=$SYMDIR" >> /opt/ctfagent/versions.txt \
+    && chmod -R a+rX "$SYMDIR"
+
+# --- record resolved versions inside the image ------------------------------
+RUN dpkg-query -W -f='${Package}=${Version}\n' sleuthkit zbar-tools john \
+        >> /opt/ctfagent/versions.txt 2>/dev/null; \
+    dpkg-query -W -f='${Package}=${Version}\n' hashcat >> /opt/ctfagent/versions.txt 2>/dev/null || true; \
+    python3 -c "import volatility3;print('volatility3='+volatility3.__version__ if hasattr(volatility3,'__version__') else 'volatility3=2.28.2')" >> /opt/ctfagent/versions.txt; \
+    echo "--- misc 0.3 versions ---"; tail -20 /opt/ctfagent/versions.txt; \
+    echo "--- optional status ---"; cat /opt/ctfagent/optional_status.txt
+
+# --- build-time sanity: all new tools PRESENT + start (offline logic is exercised
+# at run time by eval/p42_misc_trace.py). Help/list subcommands of john/vol can exit
+# non-zero, so assert presence with `command -v` and only PRINT versions. ----------
+RUN set -e; \
+    command -v fls icat tsk_recover mmls fsstat zbarimg john zip2john vol hashcat >/dev/null; \
+    fls -V 2>&1 | head -1; icat -V 2>&1 | head -1; zbarimg --version 2>&1 | head -1; \
+    (john --list=formats 2>/dev/null | head -1) || true; \
+    python3 -c "import volatility3; print('volatility3 import ok')"; \
+    (vol -h 2>&1 | head -1) || true; \
+    (hashcat --version 2>&1 | head -1) || true; \
+    echo misc-0.3-smoke-ok
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

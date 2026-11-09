@@ -1,0 +1,135 @@
+# ctfagent-web:0.3 = ctfagent-web:0.2 + an active web-attack tool layer, so a C1 web run
+# can route a signal to a real tool instead of hand-rolling every probe:
+#   sqlmap      : SQL-injection automation (ALREADY in 0.1/0.2 via pip -- kept, re-verified)
+#   ffuf        : fast content/parameter fuzzer (directory & parameter discovery)
+#   playwright  : headless-chromium driver for DOM-XSS / JS-rendered / admin-bot targets
+#                 (BEST-EFFORT -- the chromium download/deps are heavy; if the layer fails
+#                  it is recorded and NON-FATAL, exactly as the spec requires)
+#   httpx/requests/bs4 : the agent HTTP client + parser, kept from 0.1
+#
+# Network is used at BUILD time only (apt + pip + the ffuf/chromium downloads). Every run is
+# --network none; targets are reachable on loopback only. Base ctfagent-web:0.2 is local -- do
+# not pull it. Fallback: ctfagent-web:0.2 (and 0.1) stay intact and are used when 0.3 is absent.
+FROM ctfagent-web:0.2
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- ffuf (required layer; build aborts if the fuzzer never runs) ------------------
+#   Debian bookworm does not package ffuf, so we fetch the OFFICIAL prebuilt release
+#   binary (a single static Go executable) at build time and verify it runs. This is a
+#   tool binary, not vendored source -- nothing is copy-pasted into our tree.
+ARG FFUF_VERSION=2.1.0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    url="https://github.com/ffuf/ffuf/releases/download/v${FFUF_VERSION}/ffuf_${FFUF_VERSION}_linux_amd64.tar.gz"; \
+    curl -fsSL "$url" -o /tmp/ffuf.tgz; \
+    tar -xzf /tmp/ffuf.tgz -C /usr/local/bin ffuf; \
+    rm -f /tmp/ffuf.tgz; \
+    chmod 0755 /usr/local/bin/ffuf; \
+    /usr/local/bin/ffuf -V
+
+# --- playwright + chromium (BEST-EFFORT; must NOT fail the build) ------------------
+#   pip install is pinned; `playwright install --with-deps chromium` pulls the chromium
+#   build + its apt libs. Any failure (download, deps, sandbox) is caught, recorded in
+#   /opt/ctfagent/playwright_status.txt, and the build continues with chromium absent.
+# A FIXED, world-readable browser path (not $HOME/.cache) so the non-root agent uid at
+# runtime finds the same chromium the root build installed, under any HOME.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN pip install --no-cache-dir playwright==1.47.0 \
+    || echo "pip-install-playwright-FAILED" > /opt/ctfagent/playwright_status.txt
+RUN set +e; \
+    if python3 -c "import playwright" 2>/dev/null; then \
+        python3 -m playwright install --with-deps chromium > /tmp/pw.log 2>&1; \
+        rc=$?; \
+        chmod -R a+rX /opt/ms-playwright 2>/dev/null; \
+        if [ $rc -eq 0 ] && python3 -m playwright install chromium --dry-run >/dev/null 2>&1; then \
+            echo "chromium-installed-ok" > /opt/ctfagent/playwright_status.txt; \
+        else \
+            echo "chromium-install-FAILED-rc$rc (non-fatal; headless lane unavailable)" \
+                > /opt/ctfagent/playwright_status.txt; \
+            tail -5 /tmp/pw.log >> /opt/ctfagent/playwright_status.txt || true; \
+        fi; \
+    else \
+        echo "playwright-import-FAILED (non-fatal)" > /opt/ctfagent/playwright_status.txt; \
+    fi; \
+    cat /opt/ctfagent/playwright_status.txt; \
+    exit 0
+
+# --- record resolved versions (append to the in-image manifest) --------------------
+RUN set +e; { \
+      printf '%s\n' '---web:0.3 additions---'; \
+      printf 'sqlmap=%s\n' "$(sqlmap --version 2>/dev/null | head -1)"; \
+      printf 'ffuf=%s\n' "$(ffuf -V 2>/dev/null | head -1)"; \
+      printf 'playwright_pip=%s\n' "$(python3 -c 'import playwright,sys;print(playwright.__version__)' 2>/dev/null || echo ABSENT)"; \
+      printf 'playwright_status=%s\n' "$(cat /opt/ctfagent/playwright_status.txt 2>/dev/null)"; \
+    } >> /opt/ctfagent/versions.txt; cat /opt/ctfagent/versions.txt; exit 0
+
+# --- build-time smoke: each tool runs against an in-container loopback target -------
+#   (build network is up here, but we only ever touch 127.0.0.1 -- the same loopback-only
+#    shape every runtime --network none run uses.) ffuf is REQUIRED to pass; playwright is
+#    skipped gracefully when the best-effort layer above did not land chromium.
+RUN python3 - <<'PY'
+import subprocess, tempfile, os, time, socket, signal, sys, json
+
+def free_port():
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
+
+def wait_up(port, tries=100):
+    for _ in range(tries):
+        try:
+            c = socket.create_connection(("127.0.0.1", port), 0.2); c.close(); return True
+        except OSError:
+            time.sleep(0.05)
+    return False
+
+results = {}
+
+# --- sqlmap: confirm the engine loads and self-reports a version (offline) ---------
+r = subprocess.run(["sqlmap", "--version"], capture_output=True, text=True)
+assert r.returncode == 0 and r.stdout.strip(), r.stderr
+results["sqlmap"] = "ok:" + r.stdout.strip().splitlines()[0]
+
+# --- ffuf: fuzz a real loopback http.server docroot for a hidden path --------------
+d = tempfile.mkdtemp()
+os.makedirs(os.path.join(d, "admin"))
+open(os.path.join(d, "admin", "index.html"), "w").write("secret-admin")
+port = free_port()
+srv = subprocess.Popen([sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1"],
+                       cwd=d, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    assert wait_up(port), "http.server never bound"
+    wl = os.path.join(d, "words.txt"); open(wl, "w").write("nope\nadmin\nalso-no\n")
+    r = subprocess.run(["ffuf", "-u", f"http://127.0.0.1:{port}/FUZZ", "-w", wl,
+                        "-mc", "200,301", "-s"], capture_output=True, text=True, timeout=60)
+    assert "admin" in (r.stdout + r.stderr), (r.stdout, r.stderr)
+    results["ffuf"] = "ok:found admin via FUZZ"
+finally:
+    srv.send_signal(signal.SIGTERM); srv.wait()
+
+# --- playwright: render a local file:// page headless (best-effort) ----------------
+try:
+    from playwright.sync_api import sync_playwright
+    page_html = os.path.join(d, "p.html")
+    open(page_html, "w").write("<html><body><h1 id=x>render-ok</h1>"
+                               "<script>document.title='js-'+document.getElementById('x').innerText;</script>"
+                               "</body></html>")
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(args=["--no-sandbox"])
+        pg = b.new_page(); pg.goto("file://" + page_html)
+        txt = pg.inner_text("#x"); title = pg.title()
+        b.close()
+    assert txt == "render-ok" and title == "js-render-ok", (txt, title)
+    results["playwright"] = "ok:rendered+js-ran"
+except Exception as e:
+    results["playwright"] = "skipped(non-fatal):" + repr(e)[:120]
+
+print("WEB03_SMOKE " + json.dumps(results))
+# ffuf + sqlmap are required; playwright may be skipped non-fatally.
+assert results["sqlmap"].startswith("ok"), results
+assert results["ffuf"].startswith("ok"), results
+PY
+
+USER 65534:65534

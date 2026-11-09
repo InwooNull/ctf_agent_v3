@@ -1,0 +1,30 @@
+# ctfagent-misc:0.1  (resolved versions; apt pins = bookworm frozen, pip pinned)
+# REQUIRED (build fails if missing) + OPTIONAL status below
+
+binutils=2.40-2
+binwalk=2.3.4+dfsg1-1
+file=1:5.44-3
+foremost=1.5.7-11+b2
+imagemagick=8:6.9.11.60+dfsg-1.6+deb12u14
+libimage-exiftool-perl=12.57+dfsg-1
+poppler-utils=22.12.0-2+deb12u3
+steghide=0.5.1-15
+xxd=2:9.0.1378-2+deb12u2
+outguess=1:0.4-2
+tshark=4.0.17-0+deb12u3
+tcpdump=4.99.3-1
+libzbar0=0.23.92-7+deb12u1
+ruby=1:3.1
+Python 3.12.13
+pillow=10.4.0
+numpy=1.26.4
+
+# --- optional tool status (OK/FAIL) ---
+apt:outguess=OK
+apt:tshark=OK
+apt:tcpdump=OK
+apt:libzbar0=OK
+apt:ruby=OK
+apt:ruby-dev=OK
+pip:pyzbar==0.1.9=OK
+gem:zsteg==0.2.13=OK

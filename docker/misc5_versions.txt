@@ -1,0 +1,19 @@
+---misc:0.5 (superset of 0.4; fallback to 0.4..0.1 when absent)---
+image: ctfagent-misc:0.5 (FROM ctfagent-misc:0.4); size ~4.26GB
+build-time network only (apt + pip + stegseek .deb + rockyou download); every run stays
+--network none, read-only root FS, cap-drop ALL, no-new-privileges, non-root; only /work rw.
+
+added (Phase 49a — user-approved HUMAN-GATE tools for the Phase-48 walls):
+  tesseract = tesseract 5.3.0 (+ eng language data)       # OCR: visual/drawn flags
+  opencv    = 4.10.0 (opencv-python-headless)             # cv2: image ops / Haar cascades
+  stegseek  = StegSeek 0.6                                 # fast steghide passphrase crack
+  wordlist  = /opt/wordlists/rockyou.txt  (source: SecLists/rockyou.txt, 14,344,392 lines)
+              [+ a seed passphrase 'stegseek_e2e_seed_pass' appended for the e2e test]
+kept: everything from 0.4 (gcc/g++/make, sleuthkit/john/zbar/vol3/hashcat/p7zip/...).
+
+build smoke (all pass): CV2_OK 4.10.0; OCR_OK (tesseract read drawn text); misc-0.5-stegseek-smoke-ok
+  (embed under a seed pass -> stegseek cracked it from the wordlist).
+runtime e2e (tests/test_p49_tools_e2e.py, --network none, read-only root): OCR+cv2, stegseek crack,
+  isolation flags preserved, egress blocked.
+harness pin: MISC_IMAGE_FINALS -> ctfagent-misc:0.5; MISC_FINALS_TOOLS += tesseract/stegseek/cv2;
+  MISC_WORDLIST=/opt/wordlists/rockyou.txt. p45ms/p48 growth route image -> 0.5.

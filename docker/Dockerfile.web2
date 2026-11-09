@@ -1,0 +1,88 @@
+# ctfagent-web:0.2 = ctfagent-web:0.1 + a single-service PHP runtime (php-cli built-in
+# server) and Flask, so single-service PHP / py3-Flask web challenges can be stood up on
+# the web-service 2-uid boundary. Heavy/multi stacks (py2, node, java, DB servers,
+# multi-container, docker-in-docker) are deliberately NOT covered here -- they stay C.
+#
+# Network is used at BUILD time only (apt + pip). Every run is --network none; targets
+# are reachable on loopback only. Base ctfagent-web:0.1 is local -- do not pull it.
+# Fallback: ctfagent-web:0.1 stays intact and is used when 0.2 is absent.
+FROM ctfagent-web:0.1
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- PHP runtime (required layer; build aborts if apt fails) -----------------
+#   php-cli      : the `php -S` built-in web server (single process, no apache)
+#   php-sqlite3  : file-based sqlite (challenges that keep a local DB without a DB server)
+#   php-mbstring : multibyte string ext (very common in CSAW PHP challenges)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends php-cli php-sqlite3 php-mbstring \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- Flask (required layer; pinned) -----------------------------------------
+RUN pip install --no-cache-dir flask==3.0.3
+
+# --- record resolved versions (append to the 0.1 manifest inside the image) --
+RUN printf '%s\n' '---web:0.2 additions---' >> /opt/ctfagent/versions.txt \
+    && ( php -v | head -1 >> /opt/ctfagent/versions.txt ) \
+    && ( php -m | tr '\n' ',' | sed 's/^/php-modules:/; s/$/\n/' >> /opt/ctfagent/versions.txt ) \
+    && python3 -c "import flask; print('flask='+flask.__version__)" >> /opt/ctfagent/versions.txt \
+    && cat /opt/ctfagent/versions.txt
+
+# --- build-time smoke: php -S built-in server (GET+POST) + flask app boots ---
+RUN php -r 'echo "php-cli-ok\n";' \
+    && python3 - <<'PY'
+# php built-in server: GET a static page + POST echo via a tiny router, hit with requests.
+import subprocess, tempfile, os, time, socket, requests, sys, signal, textwrap
+d = tempfile.mkdtemp()
+open(os.path.join(d, "index.php"), "w").write(
+    "<?php if ($_SERVER['REQUEST_METHOD']==='POST'){echo 'echo:'.$_POST['k'];} "
+    "else {echo '<h1 id=x>hello</h1>';} ?>")
+# pick a free port
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+p = subprocess.Popen(["php", "-S", f"127.0.0.1:{port}", "-t", d],
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    up = False
+    for _ in range(100):
+        try:
+            c = socket.create_connection(("127.0.0.1", port), 0.2); c.close(); up = True; break
+        except OSError:
+            time.sleep(0.05)
+    assert up, "php -S never bound"
+    g = requests.get(f"http://127.0.0.1:{port}/", timeout=5)
+    assert "hello" in g.text, g.text
+    po = requests.post(f"http://127.0.0.1:{port}/", data={"k": "v"}, timeout=5)
+    assert po.text == "echo:v", po.text
+    print("php-smoke-ok")
+finally:
+    p.send_signal(signal.SIGTERM); p.wait()
+PY
+RUN python3 - <<'PY'
+# flask app boots and serves a route, hit with requests over loopback.
+import subprocess, tempfile, os, time, socket, requests, signal
+d = tempfile.mkdtemp()
+s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+open(os.path.join(d, "app.py"), "w").write(
+    "import os\nfrom flask import Flask\napp=Flask(__name__)\n"
+    "@app.route('/')\ndef i(): return 'flask-route-ok'\n"
+    "app.run(host='127.0.0.1', port=int(os.environ['PORT']))\n")
+p = subprocess.Popen(["python3", "-I", os.path.join(d, "app.py")],
+                     env={**os.environ, "PORT": str(port)},
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+try:
+    up = False
+    for _ in range(100):
+        try:
+            c = socket.create_connection(("127.0.0.1", port), 0.2); c.close(); up = True; break
+        except OSError:
+            time.sleep(0.05)
+    assert up, "flask never bound"
+    g = requests.get(f"http://127.0.0.1:{port}/", timeout=5)
+    assert g.text == "flask-route-ok", g.text
+    print("flask-smoke-ok")
+finally:
+    p.send_signal(signal.SIGTERM); p.wait()
+PY
+
+USER 65534:65534

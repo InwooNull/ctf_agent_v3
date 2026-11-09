@@ -1,0 +1,19 @@
+binutils=2.40-2
+file=1:5.44-3
+gcc=4:12.2.0-3
+gdb=13.1-3
+libc6-dev=2.36-9+deb12u14
+xxd=2:9.0.1378-2+deb12u2
+Python 3.12.13
+# ---- ctfagent-rev:0.2 (Phase 40) = 0.1 + angr (pinned to pwn:0.3 stack) ----
+# Build: docker build -f docker/Dockerfile.rev02 -t ctfagent-rev:0.2 .
+# radare2/rizin: absent from Debian bookworm -> omitted (recorded), same as 0.1.
+# angr 10.x bundles claripy as angr.claripy (no top-level claripy module).
+angr=10.0.5
+z3-solver=5.3.1
+unicorn=2.1.4
+capstone=5.0.7
+pyvex=10.0.5
+cle=10.0.5
+archinfo=10.0.5
+pypcode=4.0.1

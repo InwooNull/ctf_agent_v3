@@ -1,0 +1,7 @@
+binutils=2.40-2
+file=1:5.44-3
+gcc=4:12.2.0-3
+gdb=13.1-3
+libc6-dev=2.36-9+deb12u14
+xxd=2:9.0.1378-2+deb12u2
+Python 3.12.13

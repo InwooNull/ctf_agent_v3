@@ -1,0 +1,26 @@
+# Reverse-engineering image for the container (untrusted) sandbox profile.
+# Base is already present locally; do not pull it. apt needs network at BUILD
+# time only; every run is --network none.
+# radare2/rizin: NOT in Debian bookworm (neither main nor security); left out
+# pending approval of a pinned upstream .deb.
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        binutils gdb file xxd gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Record installed versions inside the image for reproducibility.
+RUN mkdir -p /opt/ctfagent \
+    && dpkg-query -W -f='${Package}=${Version}\n' binutils gdb file xxd gcc libc6-dev \
+         > /opt/ctfagent/versions.txt \
+    && python3 --version >> /opt/ctfagent/versions.txt \
+    && cat /opt/ctfagent/versions.txt
+
+# Build-time sanity: every tool starts.
+RUN objdump --version >/dev/null && readelf --version >/dev/null && nm --version >/dev/null \
+    && gdb --version >/dev/null && file --version >/dev/null \
+    && xxd -v 2>&1 | head -1 && gcc --version >/dev/null && echo rev-image-ok
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

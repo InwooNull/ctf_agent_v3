@@ -1,0 +1,8 @@
+{
+ "_comment": "cids excluded from future BLIND dev/holdout measurement because their solution was examined at orchestrator level (key audit / write-up cross-reference). Blindness for a solver rests on these being dropped from selection.",
+ "excluded": {
+  "mr_de0abb": "Phase 47a key-integrity audit (KEY_RIGHT): read the scorer key + cross-referenced the canonical CSAW-2015 sharpturn write-up at orchestrator level; now non-blind. Re-source if it must be measured again.",
+  "mr_1f8f74": "Phase 52: 'stonk' (CSAW) is a LIVE web/logic race-condition challenge whose flag is a remote server secret (flag.txt via a running Flask app, reached by POST /flag after racing balance>=9001). Structurally UNSOLVABLE in the blind --network none forensics harness (no live oracle, no flag.txt in-container). Not a capability signal; excluded from blind dev/holdout measurement.",
+  "mr_30b660": "Phase 52 KEY-AUDIT (KEY_RIGHT) + mis-scoped: 'CatTheFlag' CSAW-Quals 2022 (2022q-msc-cattheflag). Manifest withheld_files show a remote Node service (Dockerfile/app.js/docker-compose/node_modules) -> the real flag is SERVED by the grading service, not derivable offline. Scorer key read at orchestrator level (now non-blind): it is a legitimate remote-service flag in canonical flag{...} format; the solver's offline label-bitstream CSAW_CTF{...} was a theme-matching but WRONG guess (verifier correctly UNVERIFIED). Excluded from blind dev/holdout measurement."
+ }
+}

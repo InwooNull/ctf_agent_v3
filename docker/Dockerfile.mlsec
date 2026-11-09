@@ -1,0 +1,31 @@
+# AI/ML-security solving image for the container (untrusted) sandbox profile.
+# Base is already present locally; do not pull it. Network is used ONLY at build
+# time (pip); at run time the sandbox forces --network none.
+FROM python:3.12-slim-bookworm
+
+# libgomp1 is needed by torch/onnxruntime's OpenMP backend at import time.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin numpy below 2.0 for the widest torch/onnxruntime wheel compatibility.
+RUN pip install --no-cache-dir "numpy==1.26.4"
+
+# CPU-only torch from the official CPU wheel index (no CUDA payload).
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+        "torch==2.4.1"
+
+RUN pip install --no-cache-dir \
+        "onnx==1.16.2" \
+        "onnxruntime==1.19.2" \
+        "scikit-learn==1.5.2"
+
+# Build-time smoke: every library imports and a tiny torch model runs a forward pass.
+RUN python3 -c "import numpy, torch, onnx, onnxruntime, sklearn; \
+import torch.nn as nn; m=nn.Linear(4,2); x=torch.randn(1,4); \
+print('mlsec-image-ok', 'numpy', numpy.__version__, 'torch', torch.__version__, \
+'onnx', onnx.__version__, 'ort', onnxruntime.__version__, 'sklearn', sklearn.__version__, \
+'forward', tuple(m(x).shape))"
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

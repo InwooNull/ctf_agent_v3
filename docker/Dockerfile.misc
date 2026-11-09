@@ -1,0 +1,63 @@
+# Misc/Forensics image for the container (untrusted) sandbox profile.
+# Base is already present locally; do not pull it. apt/pip/gem need network at
+# BUILD time only; every run is --network none.
+#
+# REQUIRED tools install in one failing layer (build aborts if any is missing).
+# OPTIONAL tools (outguess, tshark/tcpdump, pyzbar runtime lib, zsteg gem) are
+# best-effort: a failure is RECORDED, never fatal, so the image still builds.
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- required apt packages (build fails if any missing) ---------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        binutils file xxd binwalk libimage-exiftool-perl steghide foremost \
+        poppler-utils imagemagick \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- optional apt packages (best-effort; record OK/FAIL, never abort) --------
+RUN mkdir -p /opt/ctfagent \
+    && apt-get update \
+    && : > /opt/ctfagent/optional_status.txt \
+    && for pkg in outguess tshark tcpdump libzbar0 ruby ruby-dev; do \
+         if apt-get install -y --no-install-recommends "$pkg" >/dev/null 2>&1; then \
+           echo "apt:$pkg=OK" >> /opt/ctfagent/optional_status.txt; \
+         else \
+           echo "apt:$pkg=FAIL" >> /opt/ctfagent/optional_status.txt; \
+         fi; \
+       done \
+    && rm -rf /var/lib/apt/lists/* \
+    && cat /opt/ctfagent/optional_status.txt
+
+# --- pip packages: pinned. pillow/numpy required; pyzbar best-effort ---------
+RUN pip install --no-cache-dir pillow==10.4.0 numpy==1.26.4 \
+    && ( pip install --no-cache-dir pyzbar==0.1.9 \
+         && echo "pip:pyzbar==0.1.9=OK" >> /opt/ctfagent/optional_status.txt \
+         || echo "pip:pyzbar==0.1.9=FAIL" >> /opt/ctfagent/optional_status.txt )
+
+# --- zsteg ruby gem: best-effort (needs native oily_png build) ---------------
+RUN ( gem install --no-document zsteg -v 0.2.13 \
+      && echo "gem:zsteg==0.2.13=OK" >> /opt/ctfagent/optional_status.txt ) \
+    || echo "gem:zsteg==0.2.13=FAIL" >> /opt/ctfagent/optional_status.txt
+
+# --- record resolved versions inside the image ------------------------------
+RUN dpkg-query -W -f='${Package}=${Version}\n' \
+        binutils file xxd binwalk libimage-exiftool-perl steghide foremost \
+        poppler-utils imagemagick > /opt/ctfagent/versions.txt 2>/dev/null; \
+    for pkg in outguess tshark tcpdump libzbar0 ruby; do \
+      dpkg-query -W -f='${Package}=${Version}\n' "$pkg" >> /opt/ctfagent/versions.txt 2>/dev/null || true; \
+    done; \
+    python3 --version >> /opt/ctfagent/versions.txt; \
+    python3 -c "import PIL,numpy;print('pillow='+PIL.__version__);print('numpy='+numpy.__version__)" >> /opt/ctfagent/versions.txt; \
+    cat /opt/ctfagent/versions.txt; cat /opt/ctfagent/optional_status.txt
+
+# --- build-time sanity: required tools start --------------------------------
+RUN file --version >/dev/null && binwalk --help >/dev/null 2>&1 \
+    && exiftool -ver >/dev/null && steghide --version >/dev/null 2>&1 \
+    && foremost -V 2>&1 | head -1 && pdftotext -v 2>&1 | head -1 \
+    && xxd -v 2>&1 | head -1 && convert --version >/dev/null \
+    && echo misc-image-ok
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

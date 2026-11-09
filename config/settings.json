@@ -1,0 +1,16 @@
+{
+  "seed": 1337,
+  "concurrency": 1,
+  "budget": {
+    "time_s": 600,
+    "max_rounds": 10,
+    "max_attempts": 50
+  },
+  "defaults": {
+    "experiment_timeout_s": 30
+  },
+  "paths": {
+    "store_dir": "store",
+    "runs_dir": "store/runs"
+  }
+}

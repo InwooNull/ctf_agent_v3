@@ -1,0 +1,61 @@
+# ctfagent-misc:0.7 = ctfagent-misc:0.6 + REAL offline vol3 memory forensics.
+#
+# 0.3 already bundled vol3's Windows/Mac/Linux symbol ISF packs into the image
+# (windows.zip 801M / mac.zip 81M / linux.zip 2.9M), carried forward unchanged to 0.6.
+# But two gaps made that path collapse to a `strings` fallback in practice:
+#   (1) vol3's FIRST symbol lookup scans the whole 801M windows.zip to build its
+#       identifier cache — minutes of work, far past the sandbox per-experiment timeout.
+#   (2) Linux symbols are kernel-build specific and cannot be universally pre-bundled;
+#       the generic path to turn challenge-provided kernel symbols into an ISF was absent.
+#
+# 0.7 fixes both, fully offline at run time:
+#   - bakes vol3's COMPLETE symbol identifier index into the image (warm_vol_cache.py),
+#     so Windows/Mac dumps resolve on a cache HIT inside the timeout -> real structure.
+#   - ships dwarf2json (prebuilt, v0.9.0) + a `vol-linux-isf` helper that builds a Linux
+#     ISF on the fly from a challenge's vmlinux+DWARF / System.map and runs `vol -s`.
+#
+# BUILD-time network is allowed (none is actually used by the bake — it is a pure local
+# scan; dwarf2json is a vendored binary). Every RUN at solve time stays --network none,
+# read-only root, cap-drop ALL, no-new-privileges, non-root; only /work is rw. Base
+# ctfagent-misc:0.6 is local; do not pull it. 0.1..0.6 remain intact fallbacks.
+FROM ctfagent-misc:0.6
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Linux ISF on-the-fly toolchain (prebuilt binary; no Go toolchain needed) -------
+COPY assets/dwarf2json-linux-amd64 /usr/local/bin/dwarf2json
+COPY assets/vol-linux-isf.sh       /usr/local/bin/vol-linux-isf
+RUN chmod 0755 /usr/local/bin/dwarf2json /usr/local/bin/vol-linux-isf \
+    && dwarf2json 2>&1 | head -1 || true
+
+# --- bake the FULL vol3 symbol identifier index (the core fix) -----------------------
+ENV VOL_BAKED_CACHE=/opt/ctfagent/volcache
+COPY assets/warm_vol_cache.py /opt/ctfagent/warm_vol_cache.py
+RUN mkdir -p "$VOL_BAKED_CACHE" \
+    && HOME=/root XDG_CACHE_HOME="$VOL_BAKED_CACHE" python3 /opt/ctfagent/warm_vol_cache.py \
+    && chmod -R a+rX "$VOL_BAKED_CACHE" \
+    && echo "--- baked vol cache ---" \
+    && find "$VOL_BAKED_CACHE" -name 'identifier.cache' -exec ls -la {} \; \
+    && du -sh "$VOL_BAKED_CACHE"
+
+# --- record versions / provenance ----------------------------------------------------
+RUN set +e; { \
+      printf '%s\n' '---misc:0.7 additions---'; \
+      printf 'dwarf2json=%s\n' "$(dwarf2json 2>&1 | grep -oiE 'version[ :v]*[0-9.]+' | head -1 || echo v0.9.0-prebuilt)"; \
+      printf 'vol-linux-isf=present (offline dwarf2json -> ISF -> vol -s)\n'; \
+      printf 'vol3-symbol-cache=BAKED at %s (full identifier index; windows/mac offline cache-hit)\n' "$VOL_BAKED_CACHE"; \
+      printf 'isf-packs=carry-forward from 0.3: windows.zip(801M)/mac.zip(81M)/linux.zip(2.9M)\n'; \
+    } >> /opt/ctfagent/versions.txt; tail -6 /opt/ctfagent/versions.txt; exit 0
+
+# --- build-time smoke: dwarf2json builds a valid ISF; baked cache present ------------
+RUN set -e; \
+    printf '%s\n' 'struct t{int pid;char comm[16];};' 'struct t g={1,"x"};' 'int main(){return g.pid;}' > /tmp/t.c; \
+    gcc -g -O0 -o /tmp/vmlinux_demo /tmp/t.c; \
+    dwarf2json linux --elf /tmp/vmlinux_demo > /tmp/isf.json; \
+    python3 -c "import json;d=json.load(open('/tmp/isf.json'));assert d['user_types'] and d['symbols'];print('misc-0.7-dwarf2json-smoke-ok types=%d syms=%d'%(len(d['user_types']),len(d['symbols'])))"; \
+    test -f "$VOL_BAKED_CACHE/volatility3/identifier.cache"; \
+    rm -f /tmp/t.c /tmp/vmlinux_demo /tmp/isf.json; \
+    echo misc-0.7-smoke-ok
+
+USER 65534:65534

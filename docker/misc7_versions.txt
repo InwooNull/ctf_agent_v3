@@ -1,0 +1,38 @@
+---misc:0.7 (superset of 0.6; fallback to 0.6..0.1 when absent)---
+image: ctfagent-misc:0.7 (FROM ctfagent-misc:0.6)
+build-time network ALLOWED but not used by the cache bake (it is a pure local scan of the
+already-bundled ISF packs); dwarf2json is a vendored binary. Every solve-time run stays
+--network none, read-only root FS, cap-drop ALL, no-new-privileges, non-root; only /work rw.
+
+added (Phase CM8 — real offline vol3 memory forensics):
+  dwarf2json = volatilityfoundation/dwarf2json v0.9.0 (prebuilt linux-amd64, vendored)
+               sha256 e2e75ba5bc9c22bc38a48edffbb050456d089d54998d54f46cb580223d9fbc6b
+               -> /usr/local/bin/dwarf2json
+  vol-linux-isf = helper: offline (challenge vmlinux+DWARF / System.map) -> ISF -> `vol -s`
+               -> /usr/local/bin/vol-linux-isf  (strings fallback + ##NEED## marker)
+  vol3 symbol cache = BAKED full identifier index at /opt/ctfagent/volcache
+               (built by warm_vol_cache.py via SqliteCache.update(); ~592s one-time build)
+               indexed: windows=3014, mac=117, linux=4 identifiers (1.5 MB sqlite)
+
+carry-forward (unchanged from 0.3, verified present in 0.6/0.7):
+  vol3 symbol ISF packs: windows.zip (801 MB, 3019 entries) / mac.zip (81 MB) / linux.zip (2.9 MB)
+  -> Windows and Mac dump symbols resolve fully offline (no per-representative needs log:
+     the standard packs are bundled in their entirety, not a 1-2 build subset).
+kept: everything from 0.6 (pycryptodome, tesseract/opencv/stegseek+rockyou, gcc/g++/make,
+  sleuthkit/john/zbar/vol3/hashcat/p7zip/...).
+
+why: 0.3 already bundled the ISF packs, but vol3's FIRST symbol lookup cold-scans the 801 MB
+  windows pack (~592s here) — far past the sandbox per-experiment timeout — so the runtime
+  path silently degraded to a `strings` scan. 0.7 bakes the identifier index so the runtime
+  lookup is a cache hit (verified: windows.pslist on a real 512 MB WinXP image returns the
+  real process tree in ~4.5 s), and the analyzer seeds /work from the baked cache.
+
+build smoke (Dockerfile): misc-0.7-dwarf2json-smoke-ok (ISF with real types+symbols from a
+  DWARF ELF); baked identifier.cache present. runtime e2e (tests/test_cm8_vol3_e2e.py,
+  --network none, read-only root): windows.pslist real processes within timeout (not strings);
+  dwarf2json builds a valid ISF offline; no-symbol Linux dump -> needs.jsonl(tool_gap).
+
+harness pin: orchestrator/contest_files.py MISC_IMAGE -> ctfagent-misc:0.7; memory family
+  analyzer seeds baked cache, routes Windows (baked symbols) / Linux (dwarf2json on the fly),
+  labels real structure vs strings-fallback, logs needs.jsonl on no_kernel_symbols.
+  Governance 7 files UNCHANGED (sha256sum -c growth/governance_baseline.txt passes); bench frozen.

@@ -1,0 +1,39 @@
+# Crypto specialist-tool image (Phase 37). FROM the proven 0.1 (kept intact).
+# Build-time network only; runtime is always --network none (the sandbox enforces it).
+# Adds: SageMath (Coppersmith / ECC / DLOG / lattice), fpylll (LLL/BKZ lattice),
+# RsaCtfTool (many offline RSA attacks). factordb is NOT installed (it needs the
+# factordb.com API -> cannot work under --network none).
+FROM ctfagent-crypto:0.1
+
+USER root
+
+# Toolchain + libs for fpylll (gmp/mpfr/fplll/qd) and git for RsaCtfTool; SageMath.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git ca-certificates pkg-config g++ \
+        libgmp-dev libmpfr-dev libmpc-dev libfplll-dev libqd-dev \
+        sagemath \
+    && rm -rf /var/lib/apt/lists/*
+
+# fpylll (lattice reduction / Coppersmith small_roots helpers) on our python 3.12.
+RUN pip install --no-cache-dir cysignals==1.12.3 fpylll==0.6.4
+
+# RsaCtfTool: clone (shallow) at a recorded commit, install its pinned requirements.
+# It is a TOOL we invoke as a subprocess; we do not copy its code into our skills.
+RUN git clone --depth 1 https://github.com/RsaCtfTool/RsaCtfTool /opt/RsaCtfTool \
+    && pip install --no-cache-dir /opt/RsaCtfTool \
+    && (cd /opt/RsaCtfTool && git rev-parse HEAD > /opt/RsaCtfTool_COMMIT.txt) \
+    && printf '#!/bin/sh\nexec RsaCtfTool "$@"\n' > /usr/local/bin/rsactftool \
+    && chmod +x /usr/local/bin/rsactftool
+
+# Build-time smokes (fail the build loudly if a tool is broken).
+RUN python3 -c "import fpylll; from fpylll import IntegerMatrix, LLL; print('fpylll-ok', fpylll.__version__)"
+RUN sage --version
+RUN rsactftool --help >/dev/null 2>&1 && echo "rsactftool-help-ok"
+# Record versions for reproducibility.
+RUN mkdir -p /opt/ctfagent && { echo "=== ctfagent-crypto:0.2 ==="; \
+      python3 -c "import Crypto,gmpy2,sympy,z3,fpylll;print('pycryptodome',Crypto.__version__);print('gmpy2',gmpy2.version());print('sympy',sympy.__version__);print('z3',z3.get_version_string());print('fpylll',fpylll.__version__)"; \
+      echo "RsaCtfTool_commit $(cat /opt/RsaCtfTool_COMMIT.txt)"; \
+      sage --version; } > /opt/ctfagent/crypto_versions_0.2.txt 2>&1 || true
+
+USER 65534:65534

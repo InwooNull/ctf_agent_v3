@@ -1,0 +1,64 @@
+# ctfagent-pwn:0.3 = ctfagent-pwn:0.2 + angr (symbolic execution) + ropper.
+#
+# Rationale (Phase 38): 0.2 already ships pwndbg (heap-aware debugger), and 0.1
+# ships pwntools / ROPgadget / one_gadget. The remaining specialist gap is a
+# symbolic-execution engine for input->state / VM / logic-check reasoning. angr
+# is added as *capability insurance* for HARD problems (same role Sage plays in
+# crypto:0.2): the heap_hard pwn subset measured this phase is not angr-shaped,
+# but VM/logic-check pwn is exactly angr's domain, so it belongs in the image and
+# the router even though this subset cannot exercise it on a real holdout.
+#
+# ropper is added (pip, lightweight) so the router's "gadget search" line has the
+# tool it names alongside the already-present ROPgadget / one_gadget.
+#
+# Build: network is used ONLY at build time (pip from PyPI, public/free). Every
+# RUN of the resulting image stays --network none (enforced by tools/pwn_service.py
+# and tools/sandbox.py). We layer ON TOP of the proven 0.2 image so pwndbg and all
+# 0.1 tooling (gcc/gdb/pwntools/ROPgadget/one_gadget) are untouched and 0.2
+# remains a working fallback.
+#
+# Pins: angr / ropper versions resolved at build time are appended to
+# /opt/ctfagent/pwn_versions.txt (recorded, not frozen to a hash here).
+FROM ctfagent-pwn:0.2
+
+# pip install needs root; 0.2 ends as USER 65534.
+USER 0:0
+
+# angr pulls z3-solver, unicorn, capstone, pyvex, claripy, cle, archinfo, ailment
+# (manylinux wheels for cp312/x86_64 exist, so no compiler work is expected).
+# ropper is a pure-python gadget finder (depends on capstone, already pulled).
+# NOTE: angr 10.x merged claripy INTO the angr package (standalone PyPI claripy
+# stops at 9.3.7). The symbolic API is reached as `angr.claripy`, never as a
+# top-level `import claripy`.
+RUN set -eux; \
+    pip install --no-cache-dir angr ropper; \
+    python3 -c "import angr; print('angr', angr.__version__); assert angr.claripy"; \
+    python3 -c "import ropper; print('ropper', ropper.VERSION if hasattr(ropper,'VERSION') else 'ok')"; \
+    { \
+      echo "# ---- ctfagent-pwn:0.3 (Phase 38) = 0.2 + angr + ropper ----"; \
+      echo "# Build: docker build -f docker/Dockerfile.pwn03 -t ctfagent-pwn:0.3 ."; \
+      echo "# angr 10.x bundles claripy as angr.claripy (no top-level claripy module)."; \
+      echo "angr=$(python3 -c 'import angr;print(angr.__version__)')"; \
+      echo "claripy=$(python3 -c 'import angr;print(angr.claripy.__version__ if hasattr(angr.claripy,\"__version__\") else \"bundled-in-angr\")')"; \
+      echo "z3-solver=$(python3 -c 'import z3;print(z3.get_version_string())' 2>/dev/null || echo present)"; \
+      echo "unicorn=$(python3 -c 'import unicorn;print(unicorn.__version__)' 2>/dev/null || echo present)"; \
+      echo "capstone=$(python3 -c 'import capstone;print(capstone.__version__)' 2>/dev/null || echo present)"; \
+      echo "ropper=$(ropper --version 2>/dev/null | head -1 || echo present)"; \
+    } >> /opt/ctfagent/pwn_versions.txt
+
+# angr/claripy write caches to $HOME; runtime uid 65534 has no home. Make a
+# world-writable cache dir and point HOME/angr at it so symbolic runs don't abort
+# trying to write under /nonexistent. (Callers may still override HOME=/work.)
+RUN mkdir -p /opt/ctfagent/angr_home && chmod 0777 /opt/ctfagent/angr_home
+
+# Build-time smoke: angr must solve a trivial symbolic constraint.
+RUN HOME=/opt/ctfagent/angr_home python3 -c "\
+import angr; claripy = angr.claripy; \
+s = claripy.Solver(); \
+x = claripy.BVS('x', 32); \
+s.add(x * 2 == 42); \
+vals = s.eval(x, 1); \
+assert vals[0] == 21, vals; \
+print('ANGR_SYMBOLIC_OK', vals[0])"
+
+USER 65534:65534

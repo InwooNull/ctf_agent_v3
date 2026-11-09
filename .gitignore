@@ -1,0 +1,27 @@
+# ── runtime data, scratch, benchmark artifacts (never published) ──
+ctf_work/
+store/
+work/
+vault/
+tests/fixtures/
+arena/live/
+store/live/
+
+# ── arena: only harness code/docs (*.py, *.md) are force-added below ──
+arena/
+
+# ── eval: publish harness/scorer code only; exclude answer-keys,
+#    dev-set generators and synthetic challenge data ──
+eval/packs/
+eval/scorer_keys/
+eval/datasets/
+eval/make_dev_challenge.py
+eval/make_dev_set.py
+
+# ── secrets ──
+config/acdc.env
+config/*.env
+
+# ── python caches ──
+*.pyc
+__pycache__/

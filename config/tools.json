@@ -1,0 +1,51 @@
+{
+  "_comment": "Phase 1 allowlist. Only safe, read-only, deterministic utilities already installed on the host. Each tool is run under its sandbox_profile. bin is resolved via PATH at probe time.",
+  "tools": {
+    "echo": {
+      "bin": "echo",
+      "version_cmd": null,
+      "smoke_cmd": ["echo", "smoke"],
+      "smoke_expect": "smoke",
+      "deterministic": true,
+      "categories": ["util"],
+      "sandbox_profile": "netns"
+    },
+    "cat": {
+      "bin": "cat",
+      "version_cmd": ["cat", "--version"],
+      "smoke_cmd": null,
+      "deterministic": true,
+      "categories": ["util", "forensics"],
+      "sandbox_profile": "netns"
+    },
+    "file": {
+      "bin": "file",
+      "version_cmd": ["file", "--version"],
+      "smoke_cmd": ["file", "-b", "-"],
+      "smoke_stdin": "\u007fELF",
+      "deterministic": true,
+      "categories": ["forensics", "rev"],
+      "sandbox_profile": "netns"
+    },
+    "base64": {
+      "bin": "base64",
+      "version_cmd": ["base64", "--version"],
+      "smoke_cmd": ["base64"],
+      "smoke_stdin": "A",
+      "smoke_expect": "QQ==",
+      "deterministic": true,
+      "categories": ["util", "crypto"],
+      "sandbox_profile": "netns"
+    },
+    "sha256sum": {
+      "bin": "sha256sum",
+      "version_cmd": ["sha256sum", "--version"],
+      "smoke_cmd": ["sha256sum"],
+      "smoke_stdin": "",
+      "smoke_expect": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "deterministic": true,
+      "categories": ["util", "crypto", "forensics"],
+      "sandbox_profile": "netns"
+    }
+  }
+}

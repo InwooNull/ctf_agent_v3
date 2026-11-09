@@ -1,0 +1,126 @@
+# ctfagent-rev:0.2 = ctfagent-rev:0.1 + angr (symbolic execution).
+#
+# Rationale (Phase 40): 0.1 ships the static/dynamic basics (binutils/objdump/
+# readelf/nm/strings/gdb/file/xxd/gcc). The specialist gap for HARD reverse is a
+# symbolic-execution engine for VM/bytecode interpreters, CFG-flattening and
+# input->state logic recovery -- exactly angr's domain, and (unlike pwn
+# weaponization) pure *analysis*, so it does not trip the API safeguards. angr
+# is added here as the measured C1 tool, pinned to the SAME versions already
+# proven in ctfagent-pwn:0.3 (angr 10.0.5 stack) for reproducibility.
+#
+# radare2 / rizin: still NOT in Debian bookworm (neither main nor security),
+# same as rev:0.1 -- left out and recorded here, pending approval of a pinned
+# upstream .deb. angr covers the symbolic lane this phase measures.
+#
+# Build: network is used ONLY at build time (pip from PyPI). Every RUN of the
+# resulting image stays --network none (enforced by tools/sandbox.py). We layer
+# ON TOP of the proven 0.1 image so all 0.1 tooling is untouched and 0.1 remains
+# a working fallback.
+FROM ctfagent-rev:0.1
+
+# pip install needs root; 0.1 ends as USER 65534.
+USER 0:0
+
+# Pin to ctfagent-pwn:0.3's resolved angr stack (recorded 2026-11, Phase 40) so
+# the two images share one symbolic engine. angr 10.x bundles claripy INSIDE the
+# angr package (standalone PyPI claripy stops at 9.3.7); reach it as angr.claripy,
+# never a top-level `import claripy`. manylinux cp312/x86_64 wheels exist for all
+# of these, so no compiler work is expected.
+RUN set -eux; \
+    pip install --no-cache-dir \
+        "angr==10.0.5" \
+        "z3-solver==5.3.1.0" \
+        "unicorn==2.1.4" \
+        "capstone==5.0.9" \
+        "pyvex==10.0.5" \
+        "archinfo==10.0.5" \
+        "cle==10.0.5" \
+        "pypcode==4.0.1"; \
+    python3 -c "import angr; print('angr', angr.__version__); assert angr.claripy"; \
+    { \
+      echo "# ---- ctfagent-rev:0.2 (Phase 40) = 0.1 + angr (pinned to pwn:0.3 stack) ----"; \
+      echo "# Build: docker build -f docker/Dockerfile.rev02 -t ctfagent-rev:0.2 ."; \
+      echo "# radare2/rizin: absent from Debian bookworm -> omitted (recorded), same as 0.1."; \
+      echo "# angr 10.x bundles claripy as angr.claripy (no top-level claripy module)."; \
+      echo "angr=$(python3 -c 'import angr;print(angr.__version__)')"; \
+      echo "z3-solver=$(python3 -c 'import z3;print(z3.get_version_string())')"; \
+      echo "unicorn=$(python3 -c 'import unicorn;print(unicorn.__version__)')"; \
+      echo "capstone=$(python3 -c 'import capstone;print(capstone.__version__)')"; \
+      echo "pyvex=$(python3 -c 'import pyvex;print(pyvex.__version__)')"; \
+      echo "cle=$(python3 -c 'import cle;print(cle.__version__)')"; \
+      echo "archinfo=$(python3 -c 'import archinfo;print(archinfo.__version__)')"; \
+      echo "pypcode=$(python3 -c 'import pypcode;print(pypcode.__version__)')"; \
+    } >> /opt/ctfagent/versions.txt
+
+# angr/claripy write caches to $HOME; runtime uid 65534 has no home. Make a
+# world-writable cache dir so symbolic runs don't abort writing under /nonexistent.
+# (Experiments may still override HOME=/work, which the rev harness mounts rw.)
+RUN mkdir -p /opt/ctfagent/angr_home && chmod 0777 /opt/ctfagent/angr_home
+
+# angr/cle call getpwuid() at import time; the sandbox runs as a uid with no
+# /etc/passwd entry (host uid 1000 or nobody 65534), which raises KeyError and
+# aborts `import angr` before the agent can do anything. Install a process-wide
+# shim via sitecustomize (loads even under `python3 -I`, which the harness uses):
+# fall back to a synthetic passwd entry on KeyError, and default HOME to the
+# world-writable cache so caching never aborts. This only makes the already-added
+# angr tool *usable* for the agent; it changes nothing about isolation (still
+# --network none, read-only root, non-root, cap-drop ALL) and runs no exploit.
+RUN cat > /usr/local/lib/python3.12/site-packages/sitecustomize.py <<'PYEOF'
+# ctfagent-rev:0.2 (Phase 40): make angr usable under the sandbox profile, where the
+# run uid has no /etc/passwd entry and the root FS is read-only (only the cwd / a bound
+# /work is writable). Both would otherwise abort `import angr` before the agent runs.
+import os
+
+
+def _writable(p):
+    try:
+        os.makedirs(p, exist_ok=True)
+        t = os.path.join(p, ".w_probe")
+        with open(t, "w") as f:
+            f.write("x")
+        os.remove(t)
+        return True
+    except OSError:
+        return False
+
+
+# Point HOME + TMPDIR at the first writable scratch dir (cwd is /work in the harness).
+for _d in (os.environ.get("TMPDIR"), os.environ.get("HOME"), os.getcwd(),
+           "/work", "/opt/ctfagent/angr_home", "/tmp"):
+    if _d and _writable(_d):
+        os.environ.setdefault("HOME", _d)
+        os.environ.setdefault("TMPDIR", _d)
+        break
+
+# Synthesize a passwd entry for a uid that lacks one (host uid 1000 / nobody 65534).
+try:
+    import pwd
+    _orig = pwd.getpwuid
+
+    def _safe_getpwuid(uid, _orig=_orig):
+        try:
+            return _orig(uid)
+        except KeyError:
+            home = os.environ.get("HOME", "/tmp")
+            return pwd.struct_passwd((
+                os.environ.get("USER", "ctfagent"), "x", int(uid), int(uid),
+                "ctfagent", home, "/bin/sh"))
+
+    pwd.getpwuid = _safe_getpwuid
+except Exception:
+    pass
+PYEOF
+RUN python3 -c "import sitecustomize; print('sitecustomize ok')"
+
+# Build-time smoke: angr must solve a trivial symbolic constraint.
+RUN HOME=/opt/ctfagent/angr_home python3 -c "\
+import angr; claripy = angr.claripy; \
+s = claripy.Solver(); \
+x = claripy.BVS('x', 32); \
+s.add(x * 3 == 111); \
+vals = s.eval(x, 1); \
+assert vals[0] == 37, vals; \
+print('ANGR_SYMBOLIC_OK', vals[0])"
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

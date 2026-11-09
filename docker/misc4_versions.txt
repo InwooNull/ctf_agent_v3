@@ -1,0 +1,18 @@
+---misc:0.4 (superset of 0.3; fallback to 0.3/0.2/0.1 when absent)---
+image: ctfagent-misc:0.4 (FROM ctfagent-misc:0.3); size ~3.83GB
+build-time network only (apt build-essential); every run stays --network none, read-only
+root FS, cap-drop ALL, no-new-privileges, non-root (uid 65534). The compiler writes only to
+the rw /work bind mount (set TMPDIR=/work; the read-only root blocks the default /tmp).
+
+added (Phase 47b tool-gap fix for the mr_de0abb / git-forensics "recovered program computes
+the flag" class):
+  gcc = gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+  g++ = g++ (Debian 12.2.0-14+deb12u1) 12.2.0
+  make = GNU Make 4.3
+kept: everything from 0.3 (sleuthkit/john/zbar/volatility3+symbols/hashcat/p7zip/...).
+
+build smoke: g++ compiled AND ran a program (misc-0.4-gpp-smoke-ok).
+runtime e2e (tests/test_p47_gpp_e2e.py, --network none, read-only root): MiscHarness compiles
+a recovered C++ program with g++ (TMPDIR=/work) and runs it to print its computed output —
+proving "execute the recovered program" is now possible, with every isolation flag preserved.
+harness pin: MISC_IMAGE_FINALS -> ctfagent-misc:0.4 (0.3 remains the prior finals fallback).

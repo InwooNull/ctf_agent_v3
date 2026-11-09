@@ -1,0 +1,23 @@
+Python 3.12.13
+requests=2.32.3
+httpx=0.27.2
+beautifulsoup4=4.12.3
+1.8.10#pip
+---optional---
+pip:sqlmap==1.8.10=OK
+playwright=DEFERRED(not installed; heavy chromium download) -- add in a 0.2 variant on demand
+---notes---
+image: ctfagent-web:0.1 (241MB); base python:3.12-slim-bookworm (local, not pulled)
+build-time network only; every run is --network none (targets on loopback only)
+required pip: requests/httpx/beautifulsoup4 (agent HTTP client + parser)
+target runtime: python stdlib (http.server/wsgiref/sqlite3) -- no PHP, no Flask
+optional: sqlmap (pip, present); playwright+chromium DEFERRED (heavy) -- add ctfagent-web:0.2 on demand
+
+---web:0.2 (superset of 0.1; fallback to 0.1 when absent)---
+image: ctfagent-web:0.2 (FROM ctfagent-web:0.1); build-time network only; every run --network none
+added apt: php-cli php-sqlite3 php-mbstring  -> PHP 8.2.35 (cli), ext incl. sqlite3/pdo_sqlite/mbstring
+added pip: flask==3.0.3
+purpose: stand up SINGLE-service PHP (`php -S`) or py3 Flask web apps on the web-service 2-uid boundary
+out of scope (stay C): python2, node, java/tomcat, DB servers (mysql/mongo/postgres/redis),
+  multi-container stacks, docker-in-docker (gatekeeping) -- these need a heavier image, not built
+smoke (build-time): php-cli-ok, php-smoke-ok (php -S GET/POST), flask-smoke-ok (flask app boots+serves)

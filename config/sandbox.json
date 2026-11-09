@@ -1,0 +1,20 @@
+{
+  "_comment": "Container isolation profile parameters (Phase 2). Only a locally-present image is used; nothing is pulled automatically.",
+  "container": {
+    "image": "python:3.12-slim-bookworm",
+    "network": "none",
+    "read_only_root": true,
+    "user": "host",
+    "cap_drop": ["ALL"],
+    "no_new_privileges": true,
+    "container_workdir": "/work",
+    "container_input": "/input",
+    "limits": {
+      "memory": "256m",
+      "cpus": "1.0",
+      "pids_limit": 128,
+      "fsize_bytes": 16777216
+    },
+    "default_timeout_s": 30
+  }
+}

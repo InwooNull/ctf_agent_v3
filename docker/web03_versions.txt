@@ -1,0 +1,35 @@
+---web:0.3 (superset of 0.2; fallback to 0.2 then 0.1 when absent)---
+image: ctfagent-web:0.3 (FROM ctfagent-web:0.2); size ~1.7GB
+build-time network only (apt curl/ca-certificates + the ffuf release + the chromium build);
+every run is --network none (targets reachable on loopback 127.0.0.1:$PORT only)
+
+added (active web-attack tool layer):
+  sqlmap=1.8.10#pip        (ALREADY in 0.1/0.2 via pip; re-verified, no change)
+  ffuf=2.1.0               (official prebuilt linux-amd64 release binary -> /usr/local/bin/ffuf;
+                            Debian bookworm does not package ffuf. REQUIRED layer.)
+  playwright_pip=1.47.0    (pip; BEST-EFFORT layer -- non-fatal if it or chromium fails)
+  chromium=chromium-1134   (+ ffmpeg-1010) installed to PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright,
+                            world-readable (chmod a+rX) so the NON-ROOT agent uid finds it at runtime
+                            regardless of HOME. status: chromium-installed-ok
+kept from 0.1/0.2: requests, httpx, beautifulsoup4, php-cli/php-sqlite3/php-mbstring, flask==3.0.3
+
+build-time smoke (WEB03_SMOKE, all pass): sqlmap --version ok; ffuf found a hidden path via FUZZ on a
+  loopback http.server; playwright rendered a local page headless AND ran its JS.
+runtime smoke (--network none, non-root uid, WEB03_RUNTIME_SMOKE, all pass): net_isolated=true;
+  sqlmap boolean-extracted a flag from a loopback sqlite-backed app; ffuf found a hidden route; playwright
+  rendered a loopback http page + ran its JS. (The playwright runtime pass required the fixed
+  world-readable PLAYWRIGHT_BROWSERS_PATH -- a root-HOME install is invisible to the agent uid.)
+
+SANDBOX QUIRKS found + documented in skills/web/fuzzing.md:
+  * ffuf's scraper reads $HOME/.config/ffuf; the sandbox uid has HOME=/nonexistent, so ffuf ABORTS with
+    "open /nonexistent/.config/ffuf/scraper: no such file or directory" before fuzzing. Fix: set
+    HOME=/work (+ mkdir -p /work/.config/ffuf) in the experiment.
+  * playwright/chromium must be launched with --no-sandbox (--disable-dev-shm-usage) under the
+    non-root, cap-dropped sandbox uid.
+
+NOTE: the IN-IMAGE /opt/ctfagent/versions.txt records `playwright_pip=ABSENT` -- cosmetic only, because
+  the probe used the nonexistent attribute `playwright.__version__`; the real pip version is 1.47.0
+  (importlib.metadata). The import itself works (proven by both smokes).
+
+out of scope (stay C, same as 0.2): python2, node, java/tomcat, DB servers, multi-container stacks,
+  docker-in-docker. wfuzz NOT added (ffuf covers the fuzzing lane).

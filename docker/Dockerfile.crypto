@@ -1,0 +1,21 @@
+# Crypto solving image for the container (untrusted) sandbox profile.
+# Base is already present locally; do not pull it.
+FROM python:3.12-slim-bookworm
+
+# gmpy2 usually ships a manylinux wheel, but keep the native GMP/MPFR/MPC
+# libraries available as a fallback for building from source.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgmp10 libmpfr6 libmpc3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+        pycryptodome==3.21.0 \
+        gmpy2==2.2.1 \
+        sympy==1.13.3 \
+        z3-solver==4.13.0.0
+
+# Sanity check at build time: all four libraries import.
+RUN python3 -c "import Crypto, gmpy2, sympy, z3; print('crypto-image-ok', Crypto.__version__, gmpy2.version(), sympy.__version__)"
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

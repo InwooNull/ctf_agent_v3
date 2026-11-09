@@ -1,0 +1,75 @@
+# Web image for the container (untrusted) sandbox profile.
+# Base is already present locally; do not pull it. pip needs network at BUILD
+# time only; every run is --network none (targets reachable on loopback only).
+#
+# REQUIRED pip install in one failing layer (build aborts if any is missing):
+#   requests / httpx    = the agent's HTTP client (sync + async)
+#   beautifulsoup4      = HTML parsing for the agent
+# Target runtime is Python stdlib (http.server / wsgiref) only -- no PHP, no
+# Flask -- so the synthetic vulnerable apps carry no extra dependency.
+# OPTIONAL: sqlmap (pip) is best-effort (record OK/FAIL, never fatal); the
+# reference solves do NOT depend on it.
+# NOT installed here: playwright + headless chromium. It needs a large browser
+# download at build and is heavy at runtime; it is recorded as "available on
+# request" in web_versions.txt rather than baked in. Add a later image variant
+# (ctfagent-web:0.2) if a JS-rendering target actually needs it.
+FROM python:3.12-slim-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- required pip packages (build fails if any missing) ---------------------
+RUN pip install --no-cache-dir \
+        requests==2.32.3 \
+        httpx==0.27.2 \
+        beautifulsoup4==4.12.3
+
+# --- optional pip packages (best-effort; record OK/FAIL, never abort) --------
+RUN mkdir -p /opt/ctfagent \
+    && : > /opt/ctfagent/optional_status.txt \
+    && ( pip install --no-cache-dir sqlmap==1.8.10 \
+         && echo "pip:sqlmap==1.8.10=OK" >> /opt/ctfagent/optional_status.txt \
+         || echo "pip:sqlmap==1.8.10=FAIL" >> /opt/ctfagent/optional_status.txt ) \
+    && echo "playwright=DEFERRED(not installed; heavy chromium download) -- add in a 0.2 variant on demand" \
+         >> /opt/ctfagent/optional_status.txt \
+    && cat /opt/ctfagent/optional_status.txt
+
+# --- record resolved versions inside the image ------------------------------
+RUN python3 --version > /opt/ctfagent/versions.txt \
+    && python3 -c "import requests,httpx,bs4;\
+print('requests='+requests.__version__);\
+print('httpx='+httpx.__version__);\
+print('beautifulsoup4='+bs4.__version__)" >> /opt/ctfagent/versions.txt \
+    && ( sqlmap --version >> /opt/ctfagent/versions.txt 2>/dev/null || true ) \
+    && cat /opt/ctfagent/versions.txt
+
+# --- build-time sanity: client + parser import and a stdlib target serves ----
+RUN python3 -c "import requests, httpx, bs4, http.server, wsgiref, sqlite3; print('web-imports-ok')" \
+    && python3 - <<'PY'
+# Smoke: start a stdlib http.server target, GET+POST it with requests, parse with bs4.
+import threading, http.server, socketserver, urllib.parse, requests
+from bs4 import BeautifulSoup
+
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.end_headers()
+        self.wfile.write(b"<html><body><h1 id=x>hello</h1></body></html>")
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0)); body = self.rfile.read(n)
+        data = urllib.parse.parse_qs(body.decode())
+        self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
+        self.wfile.write(("echo:" + data.get("k", [""])[0]).encode())
+
+srv = socketserver.TCPServer(("127.0.0.1", 0), H); port = srv.server_address[1]
+t = threading.Thread(target=srv.serve_forever, daemon=True); t.start()
+g = requests.get(f"http://127.0.0.1:{port}/", timeout=5)
+assert g.status_code == 200, g.status_code
+assert BeautifulSoup(g.text, "html.parser").find(id="x").text == "hello"
+p = requests.post(f"http://127.0.0.1:{port}/", data={"k": "v"}, timeout=5)
+assert p.text == "echo:v", p.text
+srv.shutdown()
+print("web-smoke-ok")
+PY
+
+# Non-root by default; the sandbox also forces --user at run time.
+USER 65534:65534

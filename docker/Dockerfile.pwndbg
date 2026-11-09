@@ -1,0 +1,59 @@
+# ctfagent-pwn:0.2 = ctfagent-pwn:0.1 + pwndbg pinned to a specific git commit.
+#
+# Rationale: Phase 14 recon capability give_ups clustered on libc heap + FSOP
+# (CryptoPwn, horrorscope, unsafe-linking, popping_caps*) and several cited the
+# absence of a heap-aware debugger. pwndbg adds `heap`/`bins`/`fastbins`/
+# `tcachebins`/`context` on top of gdb.
+#
+# Build: network is used ONLY at build time (git clone + apt + pip, all public,
+# free). Every RUN of the resulting image stays --network none (enforced by
+# tools/pwn_service.py and tools/sandbox.py). We layer ON TOP of the proven 0.1
+# image so the required tooling (gcc/gdb/pwntools/ROPgadget/one_gadget) is
+# untouched and 0.1 remains a working fallback.
+#
+# Pin: tag 2024.08.29 (resolved commit recorded in /opt/ctfagent/pwn_versions.txt
+# at build time). This tag targets gdb 13.x + glibc 2.3x (bookworm), matching 0.1.
+FROM ctfagent-pwn:0.1
+
+# setup.sh needs root (apt) and writes a venv; 0.1 ends as USER 65534.
+USER 0:0
+
+ARG PWNDBG_REF=2024.08.29
+ENV PWNDBG_VENV_PATH=/opt/pwndbg/.venv
+
+# Clone the pin, record the exact commit, run the upstream installer. setup.sh
+# apt-installs its own deps and builds a venv matched to gdb's embedded python,
+# then generates /opt/pwndbg/gdbinit.py. All at build time.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends git ca-certificates; \
+    git clone https://github.com/pwndbg/pwndbg.git /opt/pwndbg; \
+    cd /opt/pwndbg; \
+    git checkout --quiet "tags/${PWNDBG_REF}"; \
+    PWNDBG_COMMIT="$(git rev-parse HEAD)"; \
+    echo "pwndbg=${PWNDBG_REF} commit=${PWNDBG_COMMIT} (git+setup.sh) PRESENT" \
+        >> /opt/ctfagent/pwn_versions.txt; \
+    ./setup.sh --update || ./setup.sh; \
+    rm -rf /var/lib/apt/lists/*
+
+# A global gdbinit so pwndbg loads for ANY uid (the pwn-service boundary runs gdb
+# as the agent uid, which has no home dir). gdb is launched with -nx by callers
+# that want pwndbg via: gdb -q -nx -ex 'source /opt/pwndbg/gdbinit.py' ...
+# We also make it the default by writing the system gdbinit.
+RUN printf 'source /opt/pwndbg/gdbinit.py\n' > /etc/gdb/gdbinit 2>/dev/null \
+      || { mkdir -p /etc/gdb && printf 'source /opt/pwndbg/gdbinit.py\n' > /etc/gdb/gdbinit; }
+
+# Make the venv + pwndbg tree readable/executable by any uid at runtime.
+RUN chmod -R a+rX /opt/pwndbg
+
+# Build-time smoke: pwndbg must actually load inside gdb and expose heap cmds.
+# (A plain `start`-less session still lists the commands; full heap walking is
+# exercised by the runtime smoke test against a real process.)
+RUN gdb -q -nx -batch \
+        -ex 'source /opt/pwndbg/gdbinit.py' \
+        -ex 'pi print("PWNDBG_PY_OK")' \
+        -ex 'help heap' 2>&1 | tee /opt/ctfagent/pwndbg_smoke.txt \
+    && grep -q PWNDBG_PY_OK /opt/ctfagent/pwndbg_smoke.txt \
+    && echo pwndbg-load-ok
+
+USER 65534:65534

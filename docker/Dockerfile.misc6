@@ -1,0 +1,43 @@
+# ctfagent-misc:0.6 = ctfagent-misc:0.5 + a crypto library (pycryptodome) for the
+# Phase-51-surfaced HUMAN-GATE tool gap (user-approved): the mandiant challenge's final
+# matryoshka layer is an AES/RSA-looking blob that NO in-container experiment could decrypt
+# because 0.5 ships no crypto library. openssl CLI is already present from the base.
+#
+# BUILD-time network only (pip). Every RUN stays --network none, read-only root, cap-drop
+# ALL, no-new-privileges, non-root; only /work is rw. Base ctfagent-misc:0.5 is local; do
+# not pull it. 0.1..0.5 remain intact fallbacks.
+FROM ctfagent-misc:0.5
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- crypto library (required) ----------------------------------------------------
+RUN pip install --no-cache-dir pycryptodome==3.21.0
+
+# --- record versions --------------------------------------------------------------
+RUN set +e; { \
+      printf '%s\n' '---misc:0.6 additions---'; \
+      printf 'pycryptodome=%s\n' "$(python3 -c 'import Crypto; print(Crypto.__version__)' 2>/dev/null || echo ABSENT)"; \
+      printf 'openssl=%s\n' "$(openssl version 2>/dev/null || echo ABSENT)"; \
+    } >> /opt/ctfagent/versions.txt; tail -4 /opt/ctfagent/versions.txt; exit 0
+
+# --- build-time smoke: an in-sandbox AES-CBC round-trip decrypts correctly ---------
+RUN python3 - <<'PY'
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+import os
+key = bytes(range(16)); iv = os.urandom(16)
+pt = b"misc06_aes_decrypt_ok flag{sample}"
+ct = AES.new(key, AES.MODE_CBC, iv).encrypt(pad(pt, 16))
+got = unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(ct), 16)
+assert got == pt, got
+# RSA sanity too (final layers are sometimes RSA)
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_OAEP
+k = RSA.generate(1024)
+r = PKCS1_OAEP.new(k).decrypt(PKCS1_OAEP.new(k.publickey()).encrypt(b"rsa_ok"))
+assert r == b"rsa_ok", r
+print("misc-0.6-crypto-smoke-ok", got.decode())
+PY
+
+USER 65534:65534

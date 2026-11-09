@@ -1,0 +1,85 @@
+# ctfagent-misc:0.5 = ctfagent-misc:0.4 + the Phase-48-surfaced HUMAN-GATE tools (user-
+# approved): OCR (tesseract), OpenCV (cv2), and stegseek + a password wordlist. These open
+# the walls the loop diagnosed in Phases 45/48 (yaar_haar needs cv2; watchword needs a
+# steghide wordlist; mandiant/clams plausibly end in a visually-drawn / stego flag).
+#
+# BUILD-time network only (apt + pip + the stegseek .deb + the wordlist). Every RUN stays
+# --network none, read-only root, cap-drop ALL, no-new-privileges, non-root; only /work is
+# rw. Base ctfagent-misc:0.4 is local; do not pull it. 0.1..0.4 remain intact fallbacks.
+FROM ctfagent-misc:0.4
+
+USER 0:0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- OCR (required) ---------------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
+# --- OpenCV headless (required) ---------------------------------------------------
+RUN pip install --no-cache-dir opencv-python-headless==4.10.0.84
+
+# --- stegseek (required): official prebuilt .deb; apt resolves its deps -----------
+ARG STEGSEEK_VERSION=0.6
+RUN set -eux; \
+    url="https://github.com/RickdeJager/stegseek/releases/download/v${STEGSEEK_VERSION}/stegseek_${STEGSEEK_VERSION}-1.deb"; \
+    curl -fsSL "$url" -o /tmp/stegseek.deb; \
+    apt-get update; apt-get install -y --no-install-recommends /tmp/stegseek.deb; \
+    rm -f /tmp/stegseek.deb; rm -rf /var/lib/apt/lists/*; \
+    stegseek --version 2>&1 | head -1
+
+# --- password wordlist (BEST-EFFORT download; non-fatal fallback to a small list) --
+#   Primary: rockyou from SecLists (allowlist source). If the download is blocked, record
+#   it and fall back to a small built-in list so builds never block. Either way a usable
+#   /opt/wordlists/rockyou.txt exists and a guaranteed-present seed passphrase is appended.
+RUN set +e; mkdir -p /opt/wordlists; \
+    url="https://github.com/danielmiessler/SecLists/raw/master/Passwords/Leaked-Databases/rockyou.txt.tar.gz"; \
+    if curl -fsSL "$url" -o /tmp/rockyou.tgz && tar -xzf /tmp/rockyou.tgz -C /opt/wordlists; then \
+        echo "wordlist_source=SecLists/rockyou.txt" > /opt/wordlists/SOURCE.txt; \
+    else \
+        echo "wordlist_source=FALLBACK (SecLists download blocked)" > /opt/wordlists/SOURCE.txt; \
+        printf '%s\n' password 123456 letmein qwerty admin flag secret steghide hidden \
+               iloveyou dragon monkey sunshine princess football charlie welcome \
+               > /opt/wordlists/rockyou.txt; \
+    fi; \
+    rm -f /tmp/rockyou.tgz; \
+    touch /opt/wordlists/rockyou.txt; \
+    printf '%s\n' 'stegseek_e2e_seed_pass' >> /opt/wordlists/rockyou.txt; \
+    cat /opt/wordlists/SOURCE.txt; wc -l /opt/wordlists/rockyou.txt; exit 0
+
+# --- record versions --------------------------------------------------------------
+RUN set +e; { \
+      printf '%s\n' '---misc:0.5 additions---'; \
+      printf 'tesseract=%s\n' "$(tesseract --version 2>&1 | head -1)"; \
+      printf 'opencv=%s\n' "$(python3 -c 'import cv2; print(cv2.__version__)' 2>/dev/null || echo ABSENT)"; \
+      printf 'stegseek=%s\n' "$(stegseek --version 2>&1 | head -1)"; \
+      printf 'wordlist=%s\n' "$(cat /opt/wordlists/SOURCE.txt) ($(wc -l < /opt/wordlists/rockyou.txt) lines)"; \
+    } >> /opt/ctfagent/versions.txt; tail -6 /opt/ctfagent/versions.txt; exit 0
+
+# --- build-time smoke: OCR + cv2 + stegseek all work (offline logic) ---------------
+RUN python3 - <<'PY'
+import subprocess, tempfile, os, numpy as np, cv2
+d = tempfile.mkdtemp()
+# cv2: draw text onto an image (basic op), write PNG
+img = np.full((60, 420, 3), 255, np.uint8)
+cv2.putText(img, "FLAGOCR123", (10, 42), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 0), 2)
+p = os.path.join(d, "t.png"); cv2.imwrite(p, img)
+print("CV2_OK", cv2.__version__)
+# tesseract: OCR the image back to text
+r = subprocess.run(["tesseract", p, "stdout"], capture_output=True, text=True)
+got = r.stdout.replace(" ", "").strip().upper()
+print("OCR_OUT", got)
+assert "FLAGOCR123" in got, got
+print("OCR_OK")
+PY
+
+# stegseek build smoke: embed a secret under a seed passphrase, crack it with the wordlist
+RUN set -eux; d="$(mktemp -d)"; \
+    python3 -c "import numpy as np,cv2; cv2.imwrite('$d/c.bmp', np.random.randint(0,255,(256,256,3),dtype='uint8'))"; \
+    printf 'STEG_FLAG_OK' > "$d/s.txt"; \
+    steghide embed -cf "$d/c.bmp" -ef "$d/s.txt" -p stegseek_e2e_seed_pass -q; \
+    stegseek --crack "$d/c.bmp" /opt/wordlists/rockyou.txt "$d/out" -xf "$d/rec.txt" 2>&1 | tail -2; \
+    grep -q STEG_FLAG_OK "$d/rec.txt"; \
+    echo misc-0.5-stegseek-smoke-ok
+
+USER 65534:65534
