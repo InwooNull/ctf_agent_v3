@@ -19,6 +19,36 @@
 - **시도수 평균 −4.67** (경험이 기여한 가드 6/6). 정답률은 양쪽 100%지만 경험이 **비용을 크게 절감**.
 - 무결성 체크 전부 0: forced-win-stub 0 · subagent 직접제출 0 · live 접근 0 · 부정 읽기 0.
 
+## 1b. 통합 전환표 (자동 집계)
+
+> 아래 블록은 `python3 eval/bench_report.py --write` 가 기존 러너들의 `report`를 호출해
+> 자동으로 채웁니다. 잠긴(locked) 카테고리는 해당 러너를 `unlock` 한 뒤 다시 돌리세요.
+
+<!-- BENCH_TABLE_START -->
+**Paired conversion (C0 = no pack/tool · C1 = pack + tool).** NYU bench is public/contaminated → conversions, not a skill-% claim.
+
+| 카테고리 | 측정 | n | C0 해결 | C1 해결 | 전환(C0실패→C1해결) | 도구귀속 전환 |
+|---|---|---|---|---|---|---|
+| rev | Reverse — router pack + angr (P40) | 4 | 1 | 1 | 0 | 0 |
+| rev | Reverse — fair re-measure, persisted /work (P41) | — | — | — | — | _LOCKED_ |
+| pwn | Pwn — knowledge pack A/B (P38) | — | — | — | — | _LOCKED_ |
+| pwn | Pwn — knowledge pack A/B (P39) | — | — | — | — | _LOCKED_ |
+
+**Count / experience (A/B).**
+
+| 카테고리 | 측정 | n | 해결 | 비고 |
+|---|---|---|---|---|
+| ai | AI guardrail — experience on/off (P27) | 6 | 6 | experience on/off: 6/6→6/6 해결, 평균시도 6.5→1.83 |
+| misc | Misc/Forensics — blind dev batch (P51) | 11 | 5 | blind dev |
+
+> **Locked**: 아래 러너의 store가 잠겨 있습니다. 해당 환경에서 unlock 후 재집계:
+>   `python3 eval/p41_rev_runner.py unlock && python3 eval/bench_report.py --write`
+>   `python3 eval/p38_pwn_runner.py unlock && python3 eval/bench_report.py --write`
+>   `python3 eval/p39_pwn_runner.py unlock && python3 eval/bench_report.py --write`
+
+_생성: `python3 eval/bench_report.py`_
+<!-- BENCH_TABLE_END -->
+
 ## 2. Reverse — 라우터팩 + angr 도입 A/B (Phase 40 / 41)
 
 router pack 없이·angr 없이(C0) vs reverse 라우터팩 + angr 10.0.5(C1)를, 이전 단계에서
