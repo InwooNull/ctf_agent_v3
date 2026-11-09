@@ -1,13 +1,45 @@
-# ctf_agent_v3 — Phase 0 + Phase 1 + Phase 2 + Phase 3
+# ctf_agent_v3 — 자율 CTF 풀이 에이전트
 
-Jeopardy CTF 자율 풀이 에이전트를 처음부터(clean-room) 만드는 프로젝트의 **Phase 0**입니다.
-이 단계에서는 LLM과 CTF 도구 없이 오케스트레이션 골격이 결정론적으로 동작하는지만 확인합니다.
+Jeopardy CTF(web / pwn / rev / crypto / misc·forensics / AI)를 **clean-room으로 처음부터** 만든
+자율 풀이 에이전트입니다. 하나의 관리형 파이프라인(`solve.py`)이 입력을 자동 판별(CTFd / URL /
+디렉터리 / 파일)하고, **트리아지·라우팅 → 카테고리 하네스 → skill_pack 주입 → StopLoss →
+검증기/증거 캡처 → 체크포인트·resume → writeup 로그**를 결정론적으로 구동합니다.
 
-## 범위 (Phase 0)
-- 포함: 규칙 기반 분류와 라우팅, mock 솔버, 체크포인트/resume, 이벤트·명령 로그, dedup 캐시, 호출 전 예산 검사
-- 제외: 실제 솔버와 도구 실행, LLM 및 외부 API, 경험 저장소, 병렬 실행(concurrency=1 고정)
-- 의존성: Python 3 표준 라이브러리만 사용
-- 성능은 주장하지 않으며, 테스트 통과 여부만 다룹니다.
+> 이 저장소는 **소스 전용 스냅샷**입니다. 실행 이력(`store/`)·벤치 데이터(`arena/`)·정답
+> 볼트(`vault/`)·시크릿(`config/*.env`)은 공개하지 않습니다. 측정 결과 요약은
+> **[RESULTS.md](RESULTS.md)** 를 보세요.
+
+## 핵심 설계
+- **안전 격리 실행** — 모든 도구/실험은 샌드박스(stdlib+`unshare` netns·rlimit, 또는 docker)에서
+  실행하고, 네트워크 차단·CPU/메모리/파일크기 상한·월타임 타임아웃·셸 주입 차단을 강제합니다.
+  보장 불가 호스트에서는 `network_guaranteed=False`로 **정직하게 표시**하고 비신뢰 실행을 막습니다.
+- **증거 기반 검증** — 플래그는 추측·패턴매칭으로 보고하지 않습니다. "매칭 후보 + 실제로 실행되어
+  플래그를 출력한 컨테이너 실험"이 둘 다 있어야 SOLVED입니다(`solver/verifier.py`).
+- **`[cyber]` 게이트** — 익스플로잇 무기화가 필요한 지점은 우회하지 않고 `cyber_gate.jsonl`에
+  `logged_not_bypassed`로 기록한 뒤 StopLoss가 정직하게 멈춥니다.
+- **경험/growth 루프** — 성공·실패를 경험 저장소에 축적해 재시도 비용을 줄입니다
+  (측정 예: AI 가드레일 카테고리에서 평균 시도 6.5→1.83, [RESULTS.md](RESULTS.md)).
+- **2가지 모드** — `contest`(기본, 실대회: 타깃 네트워크 허용, 서버/플래그포맷으로 검증) /
+  `--bench`(블라인드 정직측정: `--network none` + 봉인 볼트·스코어러 키).
+
+## 빠른 시작
+```bash
+# 1) 의존성 (호스트는 stdlib 중심, 무거운 솔버 라이브러리는 docker 하네스 이미지 안에 있음)
+python3 --version            # 3.12 권장
+pip install -r requirements.txt
+
+# 2) (CTFd 대회에 붙일 때만) 접속 정보 설정 — 예시 파일을 복사해 값만 채우세요
+cp config/acdc.env.example config/acdc.env   # 이 파일은 .gitignore됨, 절대 커밋 금지
+
+# 3) 무엇이든 넣으면 알아서 모드 판별 → 파이프라인 구동
+python3 solve.py <파일 | 디렉터리 | URL | CTFd주소>  [--bench] [--ctfd] [--run]
+
+# 4) 테스트 / 격리·도구 probe
+python3 -m unittest discover -s tests -v   # docker·이미지 미가용 e2e는 자동 skip
+python3 -m tools.probe
+```
+자세한 운영 규칙은 [`CLAUDE.md`](CLAUDE.md), 측정 결과는 [`RESULTS.md`](RESULTS.md),
+카테고리·정책 설계는 [`docs/`](docs/)를 보세요.
 
 ## 구조
 ```

@@ -1,0 +1,16 @@
+# ── ctf_agent_v3 host dependencies ──────────────────────────────────────────
+# Python 3.12 권장. 오케스트레이터/파이프라인은 표준 라이브러리 중심이며,
+# 호스트에서 필요한 서드파티는 아래 뿐입니다.
+requests>=2.31      # CTFd 커넥터 (connector/)
+flask>=3.0          # mock 서비스 / 로컬 web 타깃 (tools/web_service.py, 테스트)
+numpy>=1.26         # 일부 misc/forensics 분석 유틸
+
+# ── 컨테이너 하네스 스택 (호스트에 설치하지 않음) ────────────────────────────
+# 무거운 솔버 라이브러리는 host가 아니라 docker 하네스 이미지 안에서 실행됩니다
+# (ctfagent-rev / -crypto / -pwn / -misc). 이미지 빌드는 docker/ 를 참고하세요.
+# 참고로 각 이미지가 포함하는 대표 라이브러리:
+#   rev    : angr (심볼릭 실행), unicorn, capstone
+#   crypto : sympy, pycryptodome, gmpy2, z3-solver
+#   pwn    : pwntools
+#   misc   : volatility3, pillow
+# 이들을 호스트에 깔 필요는 없습니다. 솔버는 격리 컨테이너에서 돌기 때문입니다.
