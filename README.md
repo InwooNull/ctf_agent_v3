@@ -38,7 +38,8 @@ python3 solve.py <파일 | 디렉터리 | URL | CTFd주소>  [--bench] [--ctfd] 
 python3 -m unittest discover -s tests -v   # docker·이미지 미가용 e2e는 자동 skip
 python3 -m tools.probe
 ```
-자세한 운영 규칙은 [`CLAUDE.md`](CLAUDE.md), 측정 결과는 [`RESULTS.md`](RESULTS.md),
+**전체 구조·동작·도구·스킬 총정리는 [`ARCHITECTURE.md`](ARCHITECTURE.md)** (다이어그램 포함).
+운영 규칙은 [`CLAUDE.md`](CLAUDE.md), 측정 결과는 [`RESULTS.md`](RESULTS.md),
 카테고리·정책 설계는 [`docs/`](docs/)를 보세요.
 
 ## 구조
