@@ -26,14 +26,35 @@ bespoke embedding. With Pillow+numpy:
 - check the **alpha** channel and any palette; check for data **after** the image's end
   marker (`binwalk`).
 
+**Bespoke spatial / carrier-warp (when EVERY standard tool fails on a structured image):**
+if `file`/`exiftool`/`strings`/`binwalk`, `zsteg -a`, LSB, bit-planes, palette/alpha, and
+spectrogram all come up empty, but the image clearly *carries structure* (it is not random
+noise — you see streaks, bands, or a regular pattern), stop bit-level hunting and suspect a
+**geometric** encoding. The shape: a visible **carrier** layer (a distinct colour / channel
+/ mark-set with *deterministic* regularity — e.g. a constant number of marks per column or
+row) encodes the **parameter** of a transform applied to a scrambled **data** layer (a
+per-column/row circular shift/roll, a rotation, an interleave, a permutation). The data
+looks warped *because* each line was shifted by its own amount.
+- Tells: a colour that recurs in a regular / constant-count pattern; data that reads as
+  vertical (or horizontal) **streaks** (each column/row shifted independently); a name
+  hinting *adjust / shift / shuffle / roll / scramble*.
+- Recovery (Pillow+numpy): split layers by colour mask; read the per-line parameter off the
+  carrier (e.g. the top-most carrier-mark `y` per column, or its mark count); invert the
+  transform on the data layer (`np.roll(col, -offset)` per column, or `argsort` to undo a
+  permutation); a light Gaussian blur sharpens anti-aliased marks into readable text.
+- Budget: this is reasoning-heavy, not a tool you can spray. If 2–3 standard passes fail on
+  a *structured* image, pivot to the carrier hypothesis **early** rather than exhausting the
+  whole budget on bit-level tools.
+
 **Passphrase hunt:** steghide/outguess need a passphrase — it is usually *given*
 (filename, exif comment, the prompt, a sibling file). If truly unknown and short, a
 wordlist attempt is possible but treat it as a last resort (`crack.md` mindset).
 
 **Failure signal → pivot:** tools + LSB + bit-planes all empty → re-examine the family
-assumption: maybe it's carving (`archive.md`), a QR hidden in the image
-(`qr_barcode.md`), or the "image" is a disguised archive (`file` lied — check the magic
-with `xxd | head`).
+assumption: if the image is *structured* (streaks/bands/a regular pattern), suspect a
+**bespoke spatial / carrier-warp** encoding (see above) before anything else; otherwise
+maybe it's carving (`archive.md`), a QR hidden in the image (`qr_barcode.md`), or the
+"image" is a disguised archive (`file` lied — check the magic with `xxd | head`).
 
 **Verify:** the extracted payload may be a further layer (`encoding.md`) — confirm the
 final flag before reporting.
