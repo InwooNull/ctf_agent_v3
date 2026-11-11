@@ -37,6 +37,10 @@ Symmetric (`sym.md`):
 - **CBC and you can tamper ciphertext** → bit-flipping; **CBC + a padding-valid/invalid oracle** → padding oracle.
 - **CTR/stream/OTP with a reused nonce or key** → keystream reuse (XOR ciphertexts, crib-drag).
 - **XOR with a short/repeating key** → frequency / key-length analysis.
+(EC)DSA signatures (`dsa.md`):
+- **two signatures share the same `r`** → reused nonce → recover `k` then `d` by pure modular algebra (no lattice).
+- **a nonce is leaked, constant, or low-entropy** → `d` directly from one signature, or brute `k`.
+- **many signatures with biased/partially-known nonces** → Hidden Number Problem → lattice → see `lattice.md`.
 ECC & discrete log (`ecc_dlog.md`):
 - **the curve is singular** (discriminant 0) → map to an easy group and solve the log.
 - **curve order is smooth** → **Pohlig–Hellman**; **#E(Fp)=p (anomalous)** → **Smart's attack**; **small embedding degree** → **MOV/pairing**.

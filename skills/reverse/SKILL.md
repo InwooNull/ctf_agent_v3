@@ -35,6 +35,9 @@ as C0. Load a detail file only when the signal below matches.
   or run static/symbolic instead of under the debugger → `antidebug.md`
 - **stripped, no symbols, static, packed, or `main` not obvious** → recover the entry
   point and the real logic before anything else → `stripped.md`
+- **a non-C runtime** (Go `.gopclntab`/`go:buildid`, Rust panic paths, .NET/CLR, a
+  `.jar`/`.class`/APK, WASM `\0asm`, PyInstaller `_MEI`) → recognize the runtime first;
+  the recovery route differs per language → `lang_runtime.md`
 
 ## angr: guard it FIRST, before you run it
 angr is powerful but can **state-explode** (hang / OOM) on exactly the big VM and

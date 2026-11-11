@@ -37,6 +37,8 @@ directly. Load a detail file only when a signal below matches — never load eve
   decode** with zbar / pyzbar → `qr_barcode.md`
 - **a packet capture** (`.pcap/.pcapng`) → **network forensics** with tshark →
   `pcap.md`
+- **a packet capture that is mostly USB** (no IP; a typed/drawn flag in HID reports) →
+  **USB HID decode** (keyboard/mouse) with tshark → `usb_hid.md`
 - **a media file with a hidden payload** (a suspiciously large PNG/JPG/WAV/BMP, stego
   hints, an odd LSB/alpha/spectrogram, a `steghide` passphrase lying around) →
   **steganography** → `stego.md`

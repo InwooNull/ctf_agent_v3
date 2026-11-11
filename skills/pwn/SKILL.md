@@ -23,6 +23,11 @@ Load a detail file only when the signal below matches.
   string, partial-overwrite under PIE/ASLR) → `leaks.md`
 - **stack overflow, NX on, no win()** → ROP: ret2libc, ret2csu, SROP, stack pivot →
   `rop.md`
+- **your input is printed back / reaches `printf` as the format** (`%p` leaks stack,
+  a bare `%s` crashes) → format string: `%k$p`/`%s` read + `%n` write → `fmtstr.md`
+- **you supply bytes to an RWX buffer and execution jumps to them, OR `execve` dies
+  with SIGSYS (a seccomp filter)** → shellcoding + seccomp ORW (open/read/write) →
+  `shellcode_seccomp.md`
 - **anything behaves differently than the recipe says** → it is almost always the
   libc version: check `glibc_versions.md` before burning budget.
 
