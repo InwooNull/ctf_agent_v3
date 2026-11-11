@@ -20,6 +20,26 @@ STOP = "STOP"
 
 DEFAULT_CAPS = {"experiments": 12, "wall_s": 1200.0, "tokens": 0}
 
+# Per-category budgets. Motivated by the first real agent-method run (b01lers misc
+# image_adjustments): an analysis/forensics challenge needed ~20 probes before the
+# recovery insight landed, over the flat 12-experiment cap. Analysis-heavy categories
+# (rev/misc) get more runway; quick-or-not categories (crypto) stay tight; pwn gets wall
+# room for interaction + reproduce. This keeps per-category budget discipline instead of
+# blanket-inflating every challenge. Unknown/None → DEFAULT_CAPS.
+CATEGORY_CAPS = {
+    "rev":    {"experiments": 24, "wall_s": 1800.0, "tokens": 0},
+    "misc":   {"experiments": 24, "wall_s": 1800.0, "tokens": 0},
+    "pwn":    {"experiments": 16, "wall_s": 1800.0, "tokens": 0},
+    "web":    {"experiments": 16, "wall_s": 1200.0, "tokens": 0},
+    "crypto": {"experiments": 12, "wall_s": 1200.0, "tokens": 0},
+}
+
+
+def caps_for(category):
+    """Return a FRESH per-category budget dict (rev/misc get more room); unknown/None
+    falls back to DEFAULT_CAPS. The near-miss RAISE_ONCE still applies on top."""
+    return dict(CATEGORY_CAPS.get((category or "").strip().lower(), DEFAULT_CAPS))
+
 
 class StopLoss:
     def __init__(self, caps=None, no_progress_k=3, raise_factor=1.5):

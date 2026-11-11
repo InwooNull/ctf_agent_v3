@@ -77,8 +77,12 @@ For each challenge in Scheduler order, spawn a solver sub-agent (Agent tool). Br
 4. **The rules** — the four invariants above, verbatim. It returns: a candidate flag + the
    evidence ref (the exact experiment name + stdout that produced it), or an honest
    give-up with the failure diagnosis (approach / budget / tool_gap).
-5. **StopLoss** — a per-challenge experiment/wall budget; when `StopLoss` signals
-   no-progress, the sub-agent stops and hands back.
+5. **StopLoss** — a per-challenge experiment/wall budget from
+   `orchestrator.stoploss.caps_for(category)`: analysis-heavy categories (rev/misc) get
+   more runway (~24 experiments), crypto/web/pwn stay tighter (12–16); the near-miss
+   RAISE_ONCE still grants one extension when a verified chain is in hand. Brief the
+   sub-agent with the category's cap so it paces probes and, when `StopLoss` signals
+   no-progress, stops and hands back cleanly (a clean give-up is a valid outcome).
 
 Keep sub-agents scoped and sequential where category vault/locks require it; otherwise a
 few may run concurrently. Do NOT let a sub-agent submit or touch governance files.

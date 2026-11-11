@@ -30,7 +30,7 @@ from pathlib import Path
 
 from orchestrator import mode as mode_mod
 from orchestrator.scheduler import Scheduler
-from orchestrator.stoploss import StopLoss, STOP, RAISE_ONCE
+from orchestrator.stoploss import StopLoss, STOP, RAISE_ONCE, caps_for
 
 # per-challenge lifecycle
 PENDING = "pending"          # never sliced yet
@@ -68,6 +68,10 @@ class RotationRunner:
         self.store.mkdir(parents=True, exist_ok=True)
         self.global_caps = dict(global_caps or DEFAULT_GLOBAL_CAPS)
         self.challenge_caps = dict(challenge_caps or DEFAULT_CHALLENGE_CAPS)
+        # When the caller did NOT pin challenge_caps, budget per category (rev/misc get
+        # more room — see stoploss.CATEGORY_CAPS); an explicit challenge_caps overrides.
+        self._caps_explicit = challenge_caps is not None
+        self._cat = {it["id"]: it.get("category") for it in self.items}
         self.slice_rounds = int(slice_rounds)
         self.no_progress_k = int(no_progress_k)
 
@@ -154,8 +158,10 @@ class RotationRunner:
     # ---- one slice ------------------------------------------------------
     def _run_slice(self, cid):
         st = self.ch[cid]
+        base_caps = (self.challenge_caps if self._caps_explicit
+                     else caps_for(self._cat.get(cid)))
         sl = (StopLoss.from_dict(st["stoploss"]) if st["stoploss"]
-              else StopLoss(caps=dict(self.challenge_caps), no_progress_k=self.no_progress_k))
+              else StopLoss(caps=dict(base_caps), no_progress_k=self.no_progress_k))
         st["status"] = IN_PROGRESS
         self._emit(cid, "slice_start", slice=st["slices"] + 1, round=st["round"],
                    spent=dict(sl.spent))
