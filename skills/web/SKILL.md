@@ -85,6 +85,36 @@ other network. Your experiment is python run as the agent uid; it may `import re
   and send it with python. `PyJWT` / the stdlib (`base64`, `hmac`, `hashlib`, `pickle`
   for analysis only) cover token work.
 
+## Live-target lane (Burp MCP)  [contest mode, networked target ONLY]
+Everything above is the `--network none` sandbox lane: the app is staged on
+`http://127.0.0.1:$PORT` **inside the container**, so a host-side proxy cannot see it —
+keep using `requests`/`WebClient`/sqlmap/ffuf there. This lane is the OTHER case: a
+**contest-mode live web challenge given as a real target URL** (or a reachable CTFd
+service), where the orchestrator session has genuine network to the target. There, and
+only there, the `mcp__burp__*` tools make HTTP work faster and more precise than raw
+`requests`:
+
+- **Map / replay a single request** → `mcp__burp__send_http1_request` (or
+  `send_http2_request` for h2). Iterate one request by hand — tweak a header/param/cookie
+  and resend — the way Repeater does. `create_repeater_tab` parks an interesting request
+  in Burp's Repeater for the user to pick up manually.
+- **Fuzz a position** (hidden params, IDOR ids, SQLi/boolean oracles, path discovery) →
+  `mcp__burp__send_to_intruder` with the payload position marked, instead of hand-rolling
+  a python loop. Still justify the wordlist/positions on budget — a tight list beats a
+  giant crawl.
+- **Review what already went over the wire** → `mcp__burp__get_proxy_http_history` /
+  `get_proxy_http_history_regex` (and the websocket equivalents) to recover tokens,
+  redirects, Set-Cookie, and endpoints the app revealed during manual browsing.
+- **Encode/decode payloads** → `mcp__burp__base64_encode/decode`, `url_encode/decode`,
+  `generate_random_string` for quick transforms without leaving the loop.
+
+Boundaries that still hold on this lane: **scope is the declared target only** — no
+spraying, no unrelated hosts, no brute/repeat spray at a server (CLAUDE.md). **Never
+auto-submit**; surface the candidate + evidence to the user. The evidence for a flag is
+the **actual Burp response** that disclosed it (capture the request+response pair) — the
+no-guess bar is identical to the sandbox lane. Governance files stay frozen; this is
+knowledge-pack guidance, nothing here edits `tools/web_service.py` or the harness.
+
 Precedence: map the app, read the signal router, pick the bug class, confirm its
 precondition, use the tool/procedure for the mechanical step, and **verify the flag by
 making the live app disclose it in-container before reporting** — a reflected or

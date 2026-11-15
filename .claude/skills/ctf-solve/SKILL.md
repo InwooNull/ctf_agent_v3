@@ -73,7 +73,14 @@ For each challenge in Scheduler order, spawn a solver sub-agent (Agent tool). Br
    `crypto`→CryptoHarness (gmpy2/pycryptodome/sympy/z3), `rev`→RevHarness (angr, in
    `ctfagent-rev`), `pwn`→PwnHarness / pwn_service_harness (local binary 2-uid boundary;
    remote = NON-WEAPONIZING benign interaction only, exploit-dev is out of scope — log and
-   give up honestly), `web`→WebHarness, `misc`→MiscHarness.
+   give up honestly), `web`→WebHarness, `misc`→MiscHarness. **Live web targets only**
+   (contest-mode plain target URL / a reachable CTFd service, NOT the `--network none`
+   file-challenge harness, whose loopback target the host cannot reach): the sub-agent may
+   additionally drive the **Burp MCP** tools (`mcp__burp__*`) from the orchestrator for
+   mapping/replay (Repeater: `send_http1_request`/`create_repeater_tab`), fuzzing
+   (`send_to_intruder`), reviewing captured traffic (`get_proxy_http_history`), and payload
+   encoding (`base64_*`/`url_*`) — see `skills/web/SKILL.md` "Live-target lane (Burp MCP)".
+   The no-guess bar is unchanged: the flag must still come from a real target response.
 4. **The rules** — the four invariants above, verbatim. It returns: a candidate flag + the
    evidence ref (the exact experiment name + stdout that produced it), or an honest
    give-up with the failure diagnosis (approach / budget / tool_gap).
