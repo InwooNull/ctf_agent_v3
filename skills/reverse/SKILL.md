@@ -61,7 +61,7 @@ are not optional — set them before the first run:
   needs real crypto/network/filesystem state angr can't model. Reach for it for VM /
   flattening / many-constraint crackmes, not for everything.
 
-## Runtime notes (this image: ctfagent-rev:0.2)
+## Runtime notes (this image: ctfagent-rev:0.3)
 - angr: `import angr; claripy = angr.claripy` (10.x bundles claripy; there is no
   top-level `claripy` module). Set `HOME=/work` (or `/opt/ctfagent/angr_home`) so it can
   write its cache; the root FS is read-only. If angr trips `getpwuid`/passwd lookups,
@@ -70,3 +70,53 @@ are not optional — set them before the first run:
 - Everything runs `--network none`, non-root, read-only root FS, scratch at `/work`.
   This is *analysis*: nothing here weaponizes a target, so it does not trip the
   orchestrator's exploit safeguards.
+
+## In-sandbox decompiler lane (Ghidra + REA)  [all in-container, --network none]
+Everything above is the `objdump`/angr lane. This lane adds a real **decompiler**
+(Ghidra 12.2 headless) and a **multi-format RE orchestrator** (REA / `rea` CLI) for
+when reading disassembly by hand or pointing angr at it isn't enough. It all runs
+INSIDE `ctfagent-rev:0.3` — `--network none`, read-only root, non-root, cap-drop ALL —
+so even REA's dynamic features execute only in the container. REA treats Ghidra as a
+native *provider*, not an LLM backend: `--provider ghidra` is pure static decompilation
+with **no model and no network**. **Never run `rea` on the host.**
+
+Reach for it when:
+- **You need C-like decompiled pseudocode** of a dense function, faster than reading
+  `objdump -d` → `rea decompile <bin> 0xADDR --provider ghidra --json` (pseudocode),
+  `rea function <bin> main --provider ghidra --json` (function dossier), or Ghidra
+  directly: `analyzeHeadless /work proj -import <bin> -postScript <GhidraScript>`. The
+  signal→technique router above still picks the *technique*; this is the mechanical
+  decompile step. Confirm every address/offset in-container before trusting it.
+- **The target isn't a plain C ELF** — an APK/.NET/WASM/JS-Electron or a runtime
+  `lang_runtime.md` names, where `objdump`+angr don't apply → `rea analyze <target>
+  --provider ghidra --json` for the overview, or the JS path
+  `npx -y rea-agents@latest analyze-javascript-application /work/app --json`.
+- **Quick triage / ELF hardening** (PIE/NX/RELRO/canary, strings, imports in one shot)
+  → `rea analyze <bin> --provider ghidra --json`. `rea providers --json` lists engines.
+- `REA_ANALYSIS_PROVIDER=ghidra` is already the image default, so `--provider ghidra`
+  is optional but kept explicit above. Set `HOME=/work` (writable) as for angr.
+
+Boundaries that still hold: **analysis only** — this recovers logic, it does not
+weaponize a target (same bar as the angr note). The flag is still **recovered and
+verified in-container**: a string Ghidra/REA prints is a *candidate*, NOT a flag, until
+the program's own check accepts the recovered input. **Never auto-submit**; surface the
+candidate + evidence to the user. The 7 governance files and `config/sandbox.json` stay
+byte-identical; the only code change for this lane is the rev harness raising the rev
+container's memory ceiling to 2g (see below).
+
+**Cost & runtime — this lane is slow and heavy; reach for it only when objdump/angr
+can't do the job.** The container is ephemeral (`--rm`), so every `rea`/Ghidra call
+re-imports and re-analyzes the target from scratch — ~85s for a tiny ELF on 1 CPU,
+minutes for a real binary.
+- **Memory:** the Ghidra JVM OOMs at the pinned 256m default; the rev harness gives
+  this image 2g (measured minimum for a clean run). You don't set this — it's automatic.
+- **Timeout:** pass a long experiment timeout — `run_experiment({... "timeout": 300})`
+  — or the 30s default kills Ghidra mid-analysis. The image sets
+  `REA_GHIDRA_STARTUP_TIMEOUT_MS=600000`; lower it via env for a quick target.
+- **Scratch:** Ghidra/REA need a writable temp dir; the root FS is read-only, so
+  `HOME=/work` and `TMPDIR=/work` (the image's sitecustomize sets both — keep them).
+- **Amortize re-analysis:** for several queries on one binary, run `analyzeHeadless`
+  once writing its project under `/work`, then reuse it with `-process` instead of
+  re-`-import`ing; with the harness's shared-`/work` (`persist_work`) route that project
+  survives between experiments. Prefer one `rea analyze` overview + targeted
+  `rea decompile <addr>` over repeatedly re-analyzing the whole binary.

@@ -81,6 +81,12 @@ For each challenge in Scheduler order, spawn a solver sub-agent (Agent tool). Br
    (`send_to_intruder`), reviewing captured traffic (`get_proxy_http_history`), and payload
    encoding (`base64_*`/`url_*`) — see `skills/web/SKILL.md` "Live-target lane (Burp MCP)".
    The no-guess bar is unchanged: the flag must still come from a real target response.
+   **Reverse decompiler lane** (in-sandbox, no host MCP): inside `ctfagent-rev:0.3` the
+   rev sub-agent's experiments may also call Ghidra headless (`analyzeHeadless`) and the
+   `rea` CLI (`rea decompile/function/analyze <bin> --provider ghidra --json`,
+   `REA_ANALYSIS_PROVIDER=ghidra`) for pseudocode / multi-format (APK/.NET/WASM) targets —
+   all offline, analysis-only, verified in-container — see `skills/reverse/SKILL.md`
+   "In-sandbox decompiler lane (Ghidra + REA)".
 4. **The rules** — the four invariants above, verbatim. It returns: a candidate flag + the
    evidence ref (the exact experiment name + stdout that produced it), or an honest
    give-up with the failure diagnosis (approach / budget / tool_gap).
