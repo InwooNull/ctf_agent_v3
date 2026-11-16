@@ -1,0 +1,59 @@
+#!/bin/bash
+# ghidra-decompile <binary> [function]  -> clean JSON [{name,entry,c}] on stdout.
+#
+# Wraps headless Ghidra so the sub-agent needs one command, not the multi-flag
+# incantation. Handles: read-only /tmp (java.io.tmpdir -> writable scratch), the
+# passwdless uid (user.home), import-once/process-reuse (project cached under the
+# scratch dir, so repeated calls in the SAME experiment skip re-analysis), and
+# stripping the "INFO ... DecompileDump.java> ... (GhidraScript)" log noise.
+#
+# Deliberately NOT `set -e`/`pipefail`: headless analyzeHeadless can exit nonzero
+# even on a usable run, so we judge success by whether DecompileDump emitted JSON,
+# not by its exit code.
+#
+# Cost (measured, 1 CPU, 2g): ~38s first call (import+analyze), ~33s each later
+# call (JVM + script-compile floor). Worth it only for many-function dumps; for
+# 1-2 lookups `rea decompile <bin> <addr> --provider ghidra --json` is simpler.
+BIN="$1"
+FN="${2:-}"
+if [ -z "$BIN" ]; then
+    echo "usage: ghidra-decompile <binary> [function]" >&2
+    exit 2
+fi
+SCRATCH="${TMPDIR:-/work}"
+# Ghidra rejects any path element starting with '.', so no hidden dir name here.
+PROJ_DIR="${GHIDRA_PROJ_DIR:-$SCRATCH/gh_proj}"
+PROJ="p"
+SP="${GHIDRA_SCRIPT_PATH:-/opt/ctfagent/ghidra_scripts}"
+HL=/opt/ghidra/support/analyzeHeadless
+# The sandbox uid has no passwd entry, so HOME defaults to "/" (read-only) and
+# Ghidra can't create its settings dir ($HOME/.config/ghidra) or save the JDK
+# path. FORCE HOME + Java temp/user.home onto the writable scratch (don't inherit
+# the ambient "/"), so Ghidra works regardless of the container's HOME.
+export HOME="$SCRATCH"
+export XDG_CONFIG_HOME="$SCRATCH/xdg"
+export _JAVA_OPTIONS="-Djava.io.tmpdir=$SCRATCH -Duser.home=$SCRATCH"
+mkdir -p "$PROJ_DIR" "$XDG_CONFIG_HOME"
+
+# Import + analyze once; reuse the saved project on later calls.
+if [ ! -e "$PROJ_DIR/$PROJ.gpr" ]; then
+    "$HL" "$PROJ_DIR" "$PROJ" -import "$BIN" >/dev/null 2>&1
+fi
+
+base="$(basename "$BIN")"
+pargs=("$PROJ_DIR" "$PROJ" -process "$base" -noanalysis
+       -scriptPath "$SP" -postScript DecompileDump.java)
+[ -n "$FN" ] && pargs+=("$FN")
+
+# Capture into a variable (no pipe) so analyzeHeadless's exit code / SIGPIPE
+# can't abort us; then peel the JSON out of the Ghidra log lines.
+out="$("$HL" "${pargs[@]}" 2>/dev/null)"
+json="$(printf '%s\n' "$out" \
+        | sed -n 's/.*DecompileDump\.java> //p' \
+        | sed -n '/DECOMP_JSON_START/,/DECOMP_JSON_END/{/DECOMP_JSON_START/d;/DECOMP_JSON_END/d;s/ *(GhidraScript) *$//;s/ *$//;p}')"
+
+if [ -z "$json" ]; then
+    echo "ghidra-decompile: no decompiler output for '$base'${FN:+ fn=$FN} (analysis may have failed)" >&2
+    exit 1
+fi
+printf '%s\n' "$json"

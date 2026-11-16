@@ -115,8 +115,12 @@ minutes for a real binary.
   `REA_GHIDRA_STARTUP_TIMEOUT_MS=600000`; lower it via env for a quick target.
 - **Scratch:** Ghidra/REA need a writable temp dir; the root FS is read-only, so
   `HOME=/work` and `TMPDIR=/work` (the image's sitecustomize sets both — keep them).
-- **Amortize re-analysis:** for several queries on one binary, run `analyzeHeadless`
-  once writing its project under `/work`, then reuse it with `-process` instead of
-  re-`-import`ing; with the harness's shared-`/work` (`persist_work`) route that project
-  survives between experiments. Prefer one `rea analyze` overview + targeted
-  `rea decompile <addr>` over repeatedly re-analyzing the whole binary.
+- **Many-function dumps — use `ghidra-decompile`, not repeated `rea`:** `rea`
+  re-imports and re-analyzes on *every* call (~60s each, no cache — the harness's
+  shared-`/work` `persist_work` does NOT speed it up). To dump several functions of one
+  binary, call the baked **`ghidra-decompile <bin> [func]`** wrapper from your
+  experiment code instead: it imports+analyzes once (~38s), then reuses the saved
+  project per call (~33s each — a JVM+script-compile floor, not re-analysis), and prints
+  pseudocode as JSON `[{name,entry,c}]`. Measured break-even is ~3 queries; for 1–2
+  lookups `rea decompile <bin> <addr> --provider ghidra --json` is simpler. The wrapper
+  handles the read-only-`/tmp` (`java.io.tmpdir`) and passwdless-uid plumbing for you.
